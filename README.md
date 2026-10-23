@@ -55,15 +55,68 @@ npm run dev
 
 ## 构建
 
+### 本地构建（仅当前平台）
+
 ```bash
 # 类型检查 + 前端构建
 npm run build
 
-# 打包安装程序（.app / .dmg / .msi / .deb 等）
+# 打包安装程序（自动生成本平台可用的格式）
 npm run tauri:build
+
+# 或指定平台格式
+npm run build:mac     # .app + .dmg
+npm run build:win     # .msi + .exe (NSIS)
+npm run build:linux   # .deb + .AppImage
 ```
 
 产物位置：`src-tauri/target/release/bundle/`
+
+> Tauri **不支持交叉编译**安装包，Windows 安装包必须在 Windows 上构建，
+> Linux 包必须在 Linux 上构建。跨平台构建请使用下方的 CI。
+
+## 自动化多平台构建（GitHub Actions）
+
+仓库内置 `.github/workflows/build.yml`，在**推送代码**或**推送 tag** 时自动执行：
+
+| 触发方式 | 行为 |
+|----------|------|
+| push / PR 到 `main` | 运行检查 + 构建全部平台安装包（作为 Actions 产物保留 30 天） |
+| 推送 `v*` tag | 额外自动创建 GitHub Release 并附加所有安装包 |
+
+### 产物对照
+
+| 平台 | 格式 | 文件名示例 |
+|------|------|-----------|
+| macOS (Apple Silicon) | `.dmg` / `.app` | `Tauri SQL Manager_1.0.0_aarch64.dmg` |
+| macOS (Intel) | `.dmg` / `.app` | `Tauri SQL Manager_1.0.0_x64.dmg` |
+| Windows x64 | `.msi` / `.exe` | `Tauri SQL Manager_1.0.0_x64_en-US.msi` |
+| Linux x64 | `.deb` / `.AppImage` | `tauri-sql-manager_1.0.0_amd64.deb` |
+
+### 发布新版本
+
+```bash
+# 修改版本号后打 tag 推送
+git tag v1.0.1
+git push origin v1.0.1
+```
+
+CI 会自动构建四个平台并在 Releases 页面生成下载链接。
+
+### 下载安装包
+
+- **最新开发版**：仓库 `Actions` → 选择对应运行记录 → 页面底部 `Artifacts`
+- **正式发布版**：仓库 `Releases` 页面
+
+### 代码签名（可选，发布正式版建议配置）
+
+| 平台 | 需要的 Secrets |
+|------|---------------|
+| macOS | `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`、`APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID` |
+| Windows | `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
+
+未配置签名时安装包仍可构建，但 macOS 首次打开需在「系统设置 → 隐私与安全性」中允许，
+Windows 会提示 SmartScreen 警告。
 
 ## 测试
 
