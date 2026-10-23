@@ -1,0 +1,49 @@
+[package]
+name = "tauri-sql-manager"
+version = "1.0.0"
+description = "基于 Tauri 2 的数据库管理桌面应用"
+authors = ["szzz666"]
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+name = "tauri_sql_manager_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net", "io-util"] }
+futures-util = "0.3"
+anyhow = "1"
+thiserror = "2"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4"] }
+dirs = "6"
+base64 = "0.22"
+bigdecimal = "0.4"
+
+sqlx = { version = "0.8", default-features = false, features = [
+  "runtime-tokio",
+  "tls-rustls-ring",
+  "sqlite",
+  "mysql",
+  "postgres",
+  "chrono",
+  "uuid",
+  "json",
+  "bigdecimal",
+] }
+tiberius = { version = "0.12", default-features = false, features = ["tds73", "rustls", "chrono"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

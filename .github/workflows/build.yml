@@ -1,0 +1,194 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ---------------------------------------------------------------
+  # 代码质量检查：前端类型检查 + Rust 测试
+  # ---------------------------------------------------------------
+  check:
+    name: Lint & Test
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Linux 系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libssl-dev build-essential
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: 缓存 Cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 前端类型检查
+        run: npx vue-tsc --noEmit
+
+      - name: 前端构建
+        run: npx vite build
+
+      - name: Rust 格式检查
+        working-directory: src-tauri
+        run: cargo fmt --all -- --check
+        continue-on-error: true
+
+      - name: Rust 单元测试与集成测试
+        working-directory: src-tauri
+        run: cargo test --all-targets
+
+      - name: Rust Clippy
+        working-directory: src-tauri
+        run: cargo clippy --all-targets -- -D warnings
+        continue-on-error: true
+
+  # ---------------------------------------------------------------
+  # 多平台安装包构建
+  # ---------------------------------------------------------------
+  build:
+    name: Build ${{ matrix.label }}
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS Apple Silicon
+          - os: macos-latest
+            label: macOS-arm64
+            target: aarch64-apple-darwin
+            bundles: app,dmg
+            artifact: macos-arm64
+          # macOS Intel
+          - os: macos-latest
+            label: macOS-x64
+            target: x86_64-apple-darwin
+            bundles: app,dmg
+            artifact: macos-x64
+          # Windows x64
+          - os: windows-latest
+            label: Windows-x64
+            target: x86_64-pc-windows-msvc
+            bundles: msi,nsis
+            artifact: windows-x64
+          # Linux x64
+          - os: ubuntu-22.04
+            label: Linux-x64
+            target: x86_64-unknown-linux-gnu
+            bundles: deb,appimage
+            artifact: linux-x64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Linux 系统依赖
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libssl-dev build-essential
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: 安装 Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: 缓存 Cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ${{ matrix.target }}
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 构建并打包
+        run: npm run tauri build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
+
+      - name: 收集构建产物
+        shell: bash
+        run: |
+          mkdir -p dist-artifacts
+          SRC="src-tauri/target/${{ matrix.target }}/release/bundle"
+          # 递归复制所有安装包，忽略 .app 目录内部的散碎文件
+          find "$SRC" -type f \( \
+            -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
+            -o -name '*.deb' -o -name '*.rpm' -o -name '*.AppImage' \
+          \) -exec cp -v {} dist-artifacts/ \;
+          echo '--- 产物清单 ---'
+          ls -lh dist-artifacts/
+
+      - name: 上传构建产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: TauriSQLManager-${{ matrix.artifact }}
+          path: dist-artifacts/*
+          if-no-files-found: warn
+          retention-days: 30
+
+  # ---------------------------------------------------------------
+  # 打 tag 时自动创建 GitHub Release 并附加安装包
+  # ---------------------------------------------------------------
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: 下载全部构建产物
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: 整理发布文件
+        run: |
+          mkdir -p release-files
+          find artifacts -type f -exec cp -v {} release-files/ \;
+          ls -lh release-files/
+
+      - name: 创建 Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-files/*
+          generate_release_notes: true
+          draft: false
