@@ -9,6 +9,9 @@ use commands::AppState;
 use db::PoolManager;
 use std::sync::Arc;
 
+/// Android / iOS 需要通过该属性导出原生入口，
+/// 桌面端该属性不生效（cfg(mobile) 为 false）。
+#[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // 初始化配置存储（读取本地连接与设置）
     store::init();

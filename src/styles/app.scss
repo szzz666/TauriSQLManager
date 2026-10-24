@@ -204,3 +204,116 @@ html.dark .el-dialog,
 html.dark .el-drawer {
   background: var(--el-bg-color-overlay);
 }
+
+/* ===== 移动端全局适配 ===== */
+
+@media (max-width: 768px) {
+  /* 工具栏按钮更紧凑，允许换行且不溢出 */
+  .page-toolbar {
+    gap: 6px;
+
+    .page-title {
+      font-size: 15px;
+    }
+
+    .el-input,
+    .el-select {
+      flex: 1 1 140px;
+      min-width: 0;
+    }
+  }
+
+  /* 对话框在窄屏下接近全宽 */
+  .el-dialog {
+    width: calc(100vw - 24px) !important;
+    max-width: none !important;
+    margin: 12px auto !important;
+  }
+
+  .el-dialog__body {
+    max-height: 65vh;
+    overflow-y: auto;
+  }
+
+  /* 抽屉占满屏宽 */
+  .el-drawer {
+    width: 100% !important;
+  }
+
+  /* 表单标签改为顶部布局（窄屏更省横向空间）
+     注意：Element Plus 的 label 使用 float + width: var(--el-form-label-width)，
+     必须用 !important 覆盖内联的 label-width 样式 */
+  .el-form-item {
+    display: block;
+    margin-bottom: 14px;
+  }
+
+  .el-form-item__label {
+    display: block !important;
+    float: none !important;
+    width: auto !important;
+    text-align: left !important;
+    justify-content: flex-start !important;
+    padding: 0 0 4px !important;
+    line-height: 1.4;
+  }
+
+  .el-form-item__content {
+    margin-left: 0 !important;
+    width: 100%;
+  }
+
+  /* 行内表单（label 与输入并排）同样改为上下布局 */
+  .el-form--inline .el-form-item {
+    display: block;
+    margin-right: 0;
+  }
+
+  /* 分页简化：只留上一页/页码/下一页 */
+  .el-pagination {
+    .el-pagination__sizes,
+    .el-pagination__jump {
+      display: none !important;
+    }
+  }
+
+  /* 表格操作列收紧 */
+  .el-table {
+    font-size: 12px;
+  }
+
+  .el-table .el-button.is-link,
+  .el-table .el-button--small {
+    padding: 4px 6px;
+    font-size: 12px;
+  }
+
+  /* 描述列表单列显示 */
+  .el-descriptions {
+    .el-descriptions__body .el-descriptions__table {
+      display: block;
+    }
+  }
+
+  /* 卡片网格单列 */
+  .el-row {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  .el-col {
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+  }
+}
+
+/* 触摸设备：加大可点击区域 */
+@media (pointer: coarse) {
+  .el-button {
+    min-height: 32px;
+  }
+
+  .el-table .el-table__cell {
+    padding: 10px 0;
+  }
+}

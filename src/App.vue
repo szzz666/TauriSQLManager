@@ -3,7 +3,7 @@
  * 应用根组件：顶栏 + 侧边栏 + 主内容区
  * 对应原项目 app.js 的布局结构，去掉了 Web 登录页
  */
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import {
   Connection,
@@ -12,6 +12,7 @@ import {
   Expand,
   Fold,
   Grid,
+  Menu,
   Setting,
   SwitchButton,
 } from '@element-plus/icons-vue'
@@ -21,10 +22,12 @@ import {
   DB_TYPE_META,
   browseData,
   clearConnection,
+  initViewportWatcher,
   onDisconnected,
   selectConnection,
   setMenu,
   state,
+  toggleMobileDrawer,
 } from '@/stores/app'
 import ConnectionManager from '@/views/ConnectionManager.vue'
 import TableExplorer from '@/views/TableExplorer.vue'
@@ -39,13 +42,20 @@ const typeMeta = computed(() =>
   activeConn.value ? DB_TYPE_META[activeConn.value.type] : null,
 )
 
+let disposeViewport: (() => void) | null = null
+
 onMounted(async () => {
+  disposeViewport = initViewportWatcher()
   try {
     info.value = await appApi.info()
   } catch (e) {
     ElMessage.error('读取应用信息失败: ' + (e as Error).message)
   }
   await restoreSession()
+})
+
+onBeforeUnmount(() => {
+  disposeViewport?.()
 })
 
 /**
@@ -113,7 +123,11 @@ function toggleTheme() {
     <!-- 顶部栏 -->
     <header class="app-header">
       <div class="flex-center gap-12">
-        <el-button text :icon="state.sidebarCollapsed ? Expand : Fold" @click="toggleSidebar" />
+        <el-button
+          text
+          :icon="state.isMobile ? Menu : state.sidebarCollapsed ? Expand : Fold"
+          @click="state.isMobile ? toggleMobileDrawer() : toggleSidebar()"
+        />
         <div class="logo" @click="goConnections">
           <span class="logo-icon">🗄️</span>
           <span class="logo-text">Tauri SQL Manager</span>
@@ -135,7 +149,7 @@ function toggleTheme() {
             {{ state.theme === 'light' ? '🌙' : '☀️' }}
           </el-button>
         </el-tooltip>
-        <el-tooltip :content="'应用版本 ' + (info?.version ?? '-')">
+        <el-tooltip v-if="!state.isMobile" :content="'应用版本 ' + (info?.version ?? '-')">
           <span class="version text-xs text-secondary">v{{ info?.version ?? '1.0.0' }}</span>
         </el-tooltip>
       </div>
@@ -143,10 +157,22 @@ function toggleTheme() {
 
     <div class="app-body">
       <!-- 侧边栏 -->
-      <aside class="app-sidebar" :class="{ collapsed: state.sidebarCollapsed }">
+      <!-- 移动端遮罩 -->
+      <div
+        v-if="state.isMobile && state.mobileDrawerOpen"
+        class="mobile-overlay"
+        @click="state.mobileDrawerOpen = false"
+      />
+      <aside
+        class="app-sidebar"
+        :class="{
+          collapsed: state.sidebarCollapsed && !state.isMobile,
+          'mobile-open': state.isMobile && state.mobileDrawerOpen,
+        }"
+      >
         <el-menu
           :default-active="state.activeMenu"
-          :collapse="state.sidebarCollapsed"
+          :collapse="state.sidebarCollapsed && !state.isMobile"
           :collapse-transition="false"
           class="sidebar-menu"
           @select="(key: string) => setMenu(key as any)"
@@ -213,6 +239,53 @@ function toggleTheme() {
         <el-empty v-else description="请先在「连接管理」中选择一个数据库" />
       </main>
     </div>
+
+    <!-- 移动端底部标签栏 -->
+    <nav v-if="state.isMobile" class="mobile-tabbar">
+      <button
+        class="tab-item"
+        :class="{ active: state.activeMenu === 'connections' }"
+        @click="setMenu('connections')"
+      >
+        <el-icon><Connection /></el-icon>
+        <span>连接</span>
+      </button>
+      <button
+        class="tab-item"
+        :class="{ active: state.activeMenu === 'tables' }"
+        :disabled="!activeConn"
+        @click="setMenu('tables')"
+      >
+        <el-icon><Grid /></el-icon>
+        <span>表</span>
+      </button>
+      <button
+        class="tab-item"
+        :class="{ active: state.activeMenu === 'data' }"
+        :disabled="!activeConn"
+        @click="setMenu('data')"
+      >
+        <el-icon><DataBoard /></el-icon>
+        <span>数据</span>
+      </button>
+      <button
+        class="tab-item"
+        :class="{ active: state.activeMenu === 'sql' }"
+        :disabled="!activeConn"
+        @click="setMenu('sql')"
+      >
+        <el-icon><EditPen /></el-icon>
+        <span>SQL</span>
+      </button>
+      <button
+        class="tab-item"
+        :class="{ active: state.activeMenu === 'settings' }"
+        @click="setMenu('settings')"
+      >
+        <el-icon><Setting /></el-icon>
+        <span>设置</span>
+      </button>
+    </nav>
   </div>
 </template>
 
@@ -260,6 +333,8 @@ function toggleTheme() {
 
 .app-body {
   flex: 1;
+  /* flex 子项默认 min-height:auto，会导致内容撑破容器、遮挡底部标签栏 */
+  min-height: 0;
   display: flex;
   overflow: hidden;
 }
@@ -303,5 +378,101 @@ function toggleTheme() {
   min-width: 0;
   overflow: hidden;
   background: var(--el-bg-color-page);
+}
+
+/* ===== 移动端适配 ===== */
+
+/* 遮罩层 */
+.mobile-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1000;
+}
+
+/* 移动端底部标签栏 */
+.mobile-tabbar {
+  flex-shrink: 0;
+  position: relative;
+  z-index: 10;
+  display: flex;
+  align-items: stretch;
+  height: 54px;
+  background: var(--el-bg-color);
+  border-top: 1px solid var(--el-border-color-light);
+  /* iOS 安全区 */
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  box-sizing: content-box;
+}
+
+.tab-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  border: none;
+  background: transparent;
+  color: var(--el-text-color-secondary);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0;
+  transition: color 0.15s;
+
+  .el-icon {
+    font-size: 19px;
+  }
+
+  &.active {
+    color: var(--el-color-primary);
+  }
+
+  &:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+
+  &:active:not(:disabled) {
+    background: var(--el-fill-color-light);
+  }
+}
+
+@media (max-width: 768px) {
+  /* 移动端：侧边栏变成抽屉 */
+  .app-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 1001;
+    width: 250px !important;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+
+    &.mobile-open {
+      transform: translateX(0);
+    }
+  }
+
+  .app-header {
+    padding: 0 8px;
+  }
+
+  .logo-text {
+    font-size: 14px;
+  }
+
+  /* 主内容区底部留出标签栏高度，避免内容被遮挡 */
+  .app-main {
+    padding-bottom: 0;
+    overflow: auto;
+  }
+
+  /* 移动端紧凑间距 */
+  .page-container {
+    padding: 12px 10px;
+  }
 }
 </style>

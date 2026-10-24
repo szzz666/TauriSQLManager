@@ -1,0 +1,178 @@
+name: Mobile Build
+
+# Android / iOS 构建
+# 说明：Tauri 移动端必须在 macOS runner 上构建 iOS，在 Linux/macOS 上构建 Android。
+# 移动端签名需额外配置，未配置时产出的是未签名包（仅用于测试）。
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: "构建平台"
+        required: true
+        default: both
+        type: choice
+        options: [both, android, ios]
+
+concurrency:
+  group: mobile-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ------------------------------------------------------------------
+  # Android：产出 APK（调试签名）与 AAB（上架 Google Play 用）
+  # ------------------------------------------------------------------
+  android:
+    name: Android
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'both' || inputs.platform == 'android'
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libssl-dev build-essential
+
+      - name: 安装 JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 安装 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 Android NDK
+        run: |
+          # Tauri 2 推荐 NDK r26+，这里固定版本保证可复现
+          echo "y" | sdkmanager --install "ndk;26.1.10909125" "platforms;android-34" "build-tools;34.0.0"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: 安装 Rust 与 Android target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: 缓存 Cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: android
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      # gen/android 不入库，由 CI 按官方模板生成，避免提交大量模板文件
+      - name: 初始化 Android 工程
+        run: npx tauri android init --ci
+
+      - name: 构建 APK 与 AAB
+        run: npx tauri android build --apk --aab --ci
+
+      - name: 收集产物
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist-artifacts
+          # 实际路径形如:
+          #   gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
+          #   gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab
+          # 用 find 兜住不同 CLI 版本的路径差异
+          find src-tauri/gen/android -type f \( -name "*.apk" -o -name "*.aab" \) \
+            -exec cp -v {} dist-artifacts/ \; 2>/dev/null || true
+          echo "--- 产物 ---"
+          ls -lh dist-artifacts/ || true
+          if ! ls dist-artifacts/* >/dev/null 2>&1; then
+            echo "::error::未生成 APK/AAB，请检查 gradle 输出目录"
+            find src-tauri/gen/android -name "outputs" -type d 2>/dev/null | head -5
+            exit 1
+          fi
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: TauriSQLManager-android
+          path: dist-artifacts/*
+          if-no-files-found: error
+          retention-days: 30
+
+  # ------------------------------------------------------------------
+  # iOS：产出未签名 .ipa（需自备证书才能真机安装）
+  # ------------------------------------------------------------------
+  ios:
+    name: iOS
+    if: github.event_name != 'workflow_dispatch' || inputs.platform == 'both' || inputs.platform == 'ios'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: 安装 Rust 与 iOS target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # 真机用 aarch64-apple-ios；模拟器用 aarch64-apple-ios-sim（Apple Silicon Mac）
+          # 不装 x86_64-apple-ios，避免 Intel 模拟器支持带来的额外体积和下载时间
+          targets: aarch64-apple-ios,aarch64-apple-ios-sim
+
+      - name: 缓存 Cargo
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: ios
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 初始化 iOS 工程
+        run: npx tauri ios init --ci
+
+      # 未配置签名证书时只能产出未签名产物，Xcode 会报 code signing 错误
+      - name: 构建 iOS（未签名）
+        run: npx tauri ios build --ci --no-sign
+        continue-on-error: true
+
+      - name: 收集 iOS 产物
+        shell: bash
+        run: |
+          mkdir -p dist-artifacts
+          # 优先收集 ipa；否则收集 .app / xcarchive
+          find src-tauri/gen/apple -type f -name "*.ipa" -exec cp -v {} dist-artifacts/ \; 2>/dev/null || true
+          if ! ls dist-artifacts/* >/dev/null 2>&1; then
+            echo "未生成 ipa（通常因为缺少 iOS 签名证书）。"
+            echo "如需真机安装，请配置 APPLE_CERTIFICATE 等 Secrets 并在构建命令去掉 --no-sign。"
+            # 退而收集 xcarchive 便于排查
+            find src-tauri/gen/apple -type d -name "*.xcarchive" -maxdepth 4 2>/dev/null | head -3 || true
+          fi
+          ls -lh dist-artifacts/ || true
+
+      - name: 上传 iOS 产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: TauriSQLManager-ios
+          path: dist-artifacts/*
+          if-no-files-found: warn
+          retention-days: 30

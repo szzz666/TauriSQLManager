@@ -15,6 +15,17 @@ src-tauri/target/
 src-tauri/target-tests/
 src-tauri/gen/schemas/
 
+# ---------- 移动端工程 ----------
+# gen/android 与 gen/apple 由 `tauri android init` / `tauri ios init`
+# 按官方模板生成，体积大且随 CLI 版本变化，不入库。
+# CI 会在构建前自动生成。
+src-tauri/gen/android/
+src-tauri/gen/apple/
+*.apk
+*.aab
+*.ipa
+*.xcarchive
+
 # ---------- 编辑器 / 系统 ----------
 .DS_Store
 Thumbs.db

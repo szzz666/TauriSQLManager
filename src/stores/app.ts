@@ -11,8 +11,12 @@ interface AppState {
   activeConnection: ConnectionConfig | null
   /** 当前菜单 */
   activeMenu: MenuKey
-  /** 侧边栏是否折叠 */
+  /** 侧边栏是否折叠（桌面端） */
   sidebarCollapsed: boolean
+  /** 移动端抽屉是否打开 */
+  mobileDrawerOpen: boolean
+  /** 是否移动端视口 */
+  isMobile: boolean
   /** 数据页要打开的表 */
   browseTable: string
   /** 数据库类型 -> 连接状态 */
@@ -27,11 +31,31 @@ export const state = reactive<AppState>({
   activeConnection: null,
   activeMenu: 'connections',
   sidebarCollapsed: false,
+  mobileDrawerOpen: false,
+  isMobile: false,
   browseTable: '',
   connectionStatus: {},
   loading: false,
   theme: 'light',
 })
+
+/** 移动端断点，需与样式中的媒体查询一致 */
+export const MOBILE_BREAKPOINT = 768
+
+/**
+ * 监听视口宽度同步 isMobile。
+ * 移动端（Android/iOS）和窄窗口切换到抽屉式导航。
+ */
+export function initViewportWatcher(): () => void {
+  const update = () => {
+    const mobile = window.innerWidth <= MOBILE_BREAKPOINT
+    state.isMobile = mobile
+    if (!mobile) state.mobileDrawerOpen = false
+  }
+  update()
+  window.addEventListener('resize', update)
+  return () => window.removeEventListener('resize', update)
+}
 
 /** 当前是否已选中连接 */
 export const hasConnection = computed(() => state.activeConnection !== null)
@@ -65,6 +89,13 @@ export function browseData(table: string) {
 
 export function setMenu(menu: MenuKey) {
   state.activeMenu = menu
+  // 移动端选择菜单后自动收起抽屉
+  state.mobileDrawerOpen = false
+}
+
+/** 切换移动端抽屉 */
+export function toggleMobileDrawer() {
+  state.mobileDrawerOpen = !state.mobileDrawerOpen
 }
 
 /** 各数据库类型的展示信息 */

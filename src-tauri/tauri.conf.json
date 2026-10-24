@@ -15,8 +15,8 @@
         "title": "Tauri SQL Manager",
         "width": 1440,
         "height": 900,
-        "minWidth": 1024,
-        "minHeight": 680,
+        "minWidth": 360,
+        "minHeight": 480,
         "resizable": true,
         "fullscreen": false,
         "center": true

@@ -156,6 +156,100 @@ xattr -dr com.apple.quarantine "/Applications/Tauri SQL Manager.app"
 
 配置后 Tauri 会在构建时自动签名并公证，用户双击即可打开，无任何提示。
 
+## 移动端构建（Android / iOS）
+
+移动端工程由 Tauri 官方模板生成，**不入库**（`src-tauri/gen/android`、`src-tauri/gen/apple`
+已在 `.gitignore` 中排除），由 CI 在构建前执行 `tauri android init` / `tauri ios init` 生成。
+
+### 触发方式
+
+工作流：`.github/workflows/mobile.yml`
+
+| 触发 | 说明 |
+|------|------|
+| push / PR 到 `main` | 同时构建 Android 与 iOS |
+| 推送 `v*` tag | 同上，产物随桌面端一起进入 Release |
+| 手动触发（Actions → Mobile Build → Run workflow） | 可选择只构建 Android 或只构建 iOS |
+
+### 产物对照
+
+| 平台 | 产物 | 说明 |
+|------|------|------|
+| Android | `app-universal-release.apk` | 调试签名，可直接安装测试 |
+| Android | `app-universal-release.aab` | 上架 Google Play 用 |
+| iOS | `.ipa` | **需要 Apple 开发者证书**，否则只产出未签名产物 |
+
+### Android 上架配置
+
+要在 Google Play 上架，需要用自己的密钥库签名。步骤：
+
+1. 本地生成密钥库：
+
+```bash
+keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA \
+  -keysize 2048 -validity 10000 -alias upload
+```
+
+2. 将密钥库 Base64 编码后存入仓库 Secrets：
+
+```bash
+base64 -i upload-keystore.jks | pbcopy   # macOS
+```
+
+3. 在仓库 `Settings → Secrets and variables → Actions` 中添加：
+
+| Secret | 内容 |
+|--------|------|
+| `ANDROID_KEY_BASE64` | 密钥库的 Base64 |
+| `ANDROID_KEY_ALIAS` | 例如 `upload` |
+| `ANDROID_KEY_PASSWORD` | 密钥库密码 |
+
+未配置时使用调试签名，产物仅供测试，**不能上架**。
+
+### iOS 构建说明
+
+iOS 产物必须签名才能在真机安装。当前 CI 以 `--no-sign` 方式构建，
+仅用于验证代码可编译通过，产物无法安装到设备。
+
+要产出可安装的 `.ipa`，需要配置：
+
+| Secret | 内容 |
+|--------|------|
+| `APPLE_CERTIFICATE` | `.p12` 证书的 Base64 |
+| `APPLE_CERTIFICATE_PASSWORD` | 证书密码 |
+| `APPLE_SIGNING_IDENTITY` | 例如 `iPhone Distribution: Your Name (TEAMID)` |
+| `APPLE_TEAM_ID` | Apple 开发者 Team ID |
+| `APPLE_PROVISIONING_PROFILE` | 描述文件 Base64（可选） |
+
+配置后把工作流中的 `--no-sign` 去掉即可产出可安装的 ipa。
+
+### 本地构建移动端
+
+需要自备 Android SDK / NDK 或完整 Xcode：
+
+```bash
+# Android（需要 ANDROID_HOME + NDK_HOME）
+npx tauri android init
+npx tauri android build --apk
+
+# iOS（需要完整 Xcode，非仅 Command Line Tools）
+npx tauri ios init
+npx tauri ios build
+```
+
+### 关于数据库功能的移动端可用性
+
+| 数据库 | Android | iOS | 说明 |
+|--------|---------|-----|------|
+| SQLite | ✅ | ✅ | 使用 sqlx bundled 模式，自带 SQLite 源码编译 |
+| PostgreSQL | ✅ | ✅ | 纯 Rust 驱动，无系统依赖 |
+| MySQL / MariaDB | ✅ | ✅ | 同上 |
+| SQL Server | ✅ | ✅ | tiberius + rustls，纯 Rust 实现 |
+
+移动端连接远程数据库需要网络权限，Android 已在模板中声明 `INTERNET`，
+iOS 首次连接时会弹出本地网络权限提示。
+
+
 ## 测试
 
 ```bash
