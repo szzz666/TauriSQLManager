@@ -124,8 +124,11 @@ jobs:
           # 实际路径形如:
           #   gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
           #   gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab
-          # 用 find 兜住不同 CLI 版本的路径差异
+          #
+          # 注意：gradle 的 bundle 目录下还会有 intermediary-bundle.aab（构建中间产物，
+          # 体积大且无用途），必须排除，否则会被当成发布包上传。
           find src-tauri/gen/android -type f \( -name "*.apk" -o -name "*.aab" \) \
+            ! -name "intermediary-*" \
             -exec cp -v {} dist-artifacts/ \; 2>/dev/null || true
           echo "--- 产物 ---"
           ls -lh dist-artifacts/ || true
