@@ -13,8 +13,9 @@ use std::sync::Arc;
 /// 桌面端该属性不生效（cfg(mobile) 为 false）。
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // 初始化配置存储（读取本地连接与设置）
-    store::init();
+    // 注意：配置目录必须在 store::init() 之前确定。
+    // 移动端没有 HOME 环境变量，dirs::data_dir() 会失败，
+    // 因此先用 Tauri 的 PathResolver 解析并注入。
 
     let pools = Arc::new(PoolManager::new());
     let pools_for_exit = Arc::clone(&pools);
@@ -22,6 +23,16 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(AppState { pools })
+        .setup(|app| {
+            use tauri::Manager;
+            // 用 Tauri 解析应用数据目录（移动端沙箱内可写）
+            if let Ok(dir) = app.path().app_data_dir() {
+                store::set_data_dir(dir);
+            }
+            // 此时路径已确定，再加载配置
+            store::init();
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
             commands::get_settings,

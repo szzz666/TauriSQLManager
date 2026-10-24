@@ -6,14 +6,27 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
-/// 应用数据目录（`~/Library/Application Support/tauri-sql-manager` 等）
-/// 可通过环境变量 TSM_DATA_DIR 覆盖，便于测试与多实例隔离
+/// 启动时由 Tauri 解析出的应用数据目录。
+/// 移动端（Android/iOS）没有 HOME 环境变量，`dirs::data_dir()` 会返回 None，
+/// 回退到 "." 是只读的安装目录，因此必须由 Tauri 的 path API 提供正确路径。
+static DATA_DIR_OVERRIDE: OnceLock<PathBuf> = OnceLock::new();
+
+/// 设置应用数据目录（在 tauri setup 中调用）
+pub fn set_data_dir(dir: PathBuf) {
+    let _ = DATA_DIR_OVERRIDE.set(dir);
+}
+
+/// 应用数据目录
+/// 优先级：TSM_DATA_DIR 环境变量（测试用） > Tauri 注入目录 > dirs 推断
 pub fn data_dir() -> PathBuf {
     let dir = match std::env::var("TSM_DATA_DIR") {
         Ok(custom) if !custom.trim().is_empty() => PathBuf::from(custom),
-        _ => dirs::data_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("tauri-sql-manager"),
+        _ => match DATA_DIR_OVERRIDE.get() {
+            Some(d) => d.clone(),
+            None => dirs::data_dir()
+                .unwrap_or_else(|| PathBuf::from("."))
+                .join("tauri-sql-manager"),
+        },
     };
     if !dir.exists() {
         let _ = fs::create_dir_all(&dir);
