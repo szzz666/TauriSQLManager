@@ -323,6 +323,32 @@ cd src-tauri && cargo test --test sqlite_integration
 npm run typecheck
 ```
 
+## 应用图标
+
+图标以 SVG 为源，用 `tauri icon` 一键生成全平台尺寸，无需手工导出各尺寸 PNG。
+
+| 文件 | 用途 |
+|------|------|
+| `app-icon.svg` | 桌面图标源（macOS / Windows / Linux），含圆角方形背景 |
+| `app-icon-android-fg.svg` | Android 自适应图标前景，透明背景，图形位于 66% 安全区 |
+| `app-icon.manifest.json` | 图标生成清单，声明上述文件与背景色 |
+
+重新生成全部图标：
+
+```bash
+npx tauri icon app-icon.manifest.json
+```
+
+生成内容覆盖：
+
+- macOS `icon.icns`
+- Windows `icon.ico` + 各种 Square 徽标
+- Linux 各尺寸 PNG
+- Android 各密度 `ic_launcher*` + 自适应图标前景
+- iOS 全套 `AppIcon-*`
+
+> Android 自适应图标的背景色在 `src-tauri/icons/android/values/ic_launcher_background.xml`，
+> 已设为品牌蓝 `#2563EB`，与图标主色一致。
 ## 目录结构
 
 ```
