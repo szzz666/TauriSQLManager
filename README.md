@@ -179,7 +179,52 @@ xattr -dr com.apple.quarantine "/Applications/Tauri SQL Manager.app"
 | Android | `app-universal-release.aab` | 上架 Google Play 用 |
 | iOS | `.ipa` | **需要 Apple 开发者证书**，否则只产出未签名产物 |
 
-### Android 上架配置
+### Android 安装包说明
+
+Release 中会提供两类 Android 产物，**用途完全不同**：
+
+| 文件 | 能否安装 | 用途 |
+|------|---------|------|
+| `TauriSQLManager_<版本>-installable.apk` | ✅ **可以直接装到手机** | 测试分发、自己使用 |
+| `TauriSQLManager_<版本>-release-unsigned.apk` | ❌ 系统拒绝安装 | 仅供配置正式签名后重新打包 |
+| `app-universal-release.aab` | ❌ 不能安装 | 上传 Google Play 用 |
+
+> ⚠️ 常见误区：`.aab` 是上架格式，**不能**直接安装到手机；
+> 名字带 `unsigned` 的 APK 也装不上——Android 要求所有 APK 必须有签名。
+
+`installable.apk` 使用**调试签名**（`debug.keystore`），所以能装，但：
+
+- 不能上架 Google Play
+- 与正式签名的应用不能共存（同一包名只能装一个）
+- 后续换正式签名需要先卸载
+
+### Android 上架配置（正式签名）
+
+要在 Google Play 上架，需要用自己的密钥库签名。步骤：
+
+1. 本地生成密钥库：
+
+```bash
+keytool -genkey -v -keystore upload-keystore.jks -keyalg RSA \
+  -keysize 2048 -validity 10000 -alias upload
+```
+
+2. 将密钥库 Base64 编码后存入仓库 Secrets：
+
+```bash
+base64 -i upload-keystore.jks | pbcopy   # macOS
+```
+
+3. 在仓库 `Settings → Secrets and variables → Actions` 中添加：
+
+| Secret | 内容 |
+|--------|------|
+| `ANDROID_KEY_BASE64` | 密钥库的 Base64 |
+| `ANDROID_KEY_ALIAS` | 例如 `upload` |
+| `ANDROID_KEY_PASSWORD` | 密钥库密码 |
+
+配置后 `release` 变体才会被正确签名，此时 `-release-unsigned.apk` 也会变成可安装的正式包。
+
 
 要在 Google Play 上架，需要用自己的密钥库签名。步骤：
 

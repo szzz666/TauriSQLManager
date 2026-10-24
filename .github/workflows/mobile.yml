@@ -144,15 +144,25 @@ jobs:
 
           # ---- 可直接安装的 APK（debug 签名）----
           # 路径形如: apk/universal/debug/app-universal-debug.apk
+          # 版本号优先取 tag（CI 中 GITHUB_REF_NAME 在 tag 触发时即为 v1.0.3），
+          # 避免 shallow clone 下 git describe 取不到 tag
+          VER="${GITHUB_REF_NAME:-}"
+          case "$VER" in
+            v*) ;;
+            *) VER=$(grep -m1 '"version"' ../package.json 2>/dev/null | sed 's/.*: "*\([^"]*\)".*/v\1/') ;;
+          esac
+          [ -n "$VER" ] || VER="dev"
+          echo "产物版本标识: $VER"
+
           DEBUG_APK=$(find "$OUT" -type f -name "*.apk" -path "*/debug/*" | head -1 || true)
           if [ -n "$DEBUG_APK" ]; then
-            cp -v "$DEBUG_APK" "dist-artifacts/TauriSQLManager_$(git describe --tags --always 2>/dev/null || echo dev)-installable.apk"
+            cp -v "$DEBUG_APK" "dist-artifacts/TauriSQLManager_${VER}-installable.apk"
           fi
 
           # ---- release APK（未签名，若已配置签名则可用）----
           RELEASE_APK=$(find "$OUT" -type f -name "*.apk" -path "*/release/*" | head -1 || true)
           if [ -n "$RELEASE_APK" ]; then
-            cp -v "$RELEASE_APK" "dist-artifacts/TauriSQLManager_$(git describe --tags --always 2>/dev/null || echo dev)-release-unsigned.apk"
+            cp -v "$RELEASE_APK" "dist-artifacts/TauriSQLManager_${VER}-release-unsigned.apk"
           fi
 
           # ---- AAB（上架 Google Play 用，排除中间产物）----
