@@ -474,6 +474,9 @@ function toggleTheme() {
      所以这里不做深色主题切换（深色下顶栏仍是品牌蓝）。 */
   .app-header {
     padding: 0 8px;
+    /* iOS 上 WebView 会伸到状态栏下方，这里补回安全区；
+       Android 由 MainActivity 在原生层补 padding，env() 返回 0，不会重复。 */
+    padding-top: env(safe-area-inset-top, 0);
     background: #2563EB;
     border-bottom-color: transparent;
     color: #fff;
