@@ -3,7 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      viewport-fit=cover 是让 env(safe-area-inset-*) 生效的前提。
+      移动端（Android 状态栏 / iOS 刘海与底部横条）需要它配合，
+      否则内容会被系统 UI 遮挡。
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#2563EB" />
     <title>Tauri SQL Manager</title>
   </head>
   <body>

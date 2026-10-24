@@ -291,7 +291,9 @@ function toggleTheme() {
 
 <style scoped lang="scss">
 .app-layout {
+  /* 用 100dvh 适配移动端浏览器地址栏/工具栏的伸缩 */
   height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background: var(--el-bg-color-page);
@@ -306,6 +308,10 @@ function toggleTheme() {
   justify-content: space-between;
   background: var(--el-bg-color);
   border-bottom: 1px solid var(--el-border-color-light);
+  /* 移动端：为状态栏/刘海留出空间，避免标题被遮挡 */
+  padding-top: env(safe-area-inset-top, 0);
+  /* 顶部安全区占位后，高度需要相应增加 */
+  box-sizing: content-box;
 }
 
 .logo {
@@ -400,7 +406,8 @@ function toggleTheme() {
   height: 54px;
   background: var(--el-bg-color);
   border-top: 1px solid var(--el-border-color-light);
-  /* iOS 安全区 */
+  /* iOS 底部横条 / Android 手势条：用 content-box + padding 撑开高度，
+     否则按钮会被系统手势区盖住 */
   padding-bottom: env(safe-area-inset-bottom, 0);
   box-sizing: content-box;
 }
@@ -450,6 +457,10 @@ function toggleTheme() {
     transform: translateX(-100%);
     transition: transform 0.25s ease;
     box-shadow: 2px 0 12px rgba(0, 0, 0, 0.15);
+    /* 抽屉覆盖全屏，需要自己避让状态栏 */
+    padding-top: env(safe-area-inset-top, 0);
+    padding-bottom: env(safe-area-inset-bottom, 0);
+    box-sizing: border-box;
 
     &.mobile-open {
       transform: translateX(0);

@@ -35,9 +35,11 @@ Thumbs.db
 *.swo
 
 # ---------- 构建产物 / 临时文件 ----------
-app-icon.png
 *.dmg
 *.msi
 *.AppImage
 *.deb
 *.rpm
+# 图标源文件保留（用于重新生成各平台图标）
+# app-icon.svg 入库
+app-icon.png
