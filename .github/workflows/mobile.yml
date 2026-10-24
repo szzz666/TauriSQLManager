@@ -51,15 +51,43 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: 安装 Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: 安装 Android NDK
+      # ubuntu-latest runner 已预装 Android SDK，无需 setup-android action
+      # （该 action 需要联网下载 cmdline-tools，在部分网络环境下会失败）
+      - name: 配置 Android SDK 与 NDK
         run: |
-          # Tauri 2 推荐 NDK r26+，这里固定版本保证可复现
-          echo "y" | sdkmanager --install "ndk;26.1.10909125" "platforms;android-34" "build-tools;34.0.0"
-          echo "NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
-          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
+          set -euo pipefail
+          # runner 预装的 SDK 路径
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          export ANDROID_SDK_ROOT="$ANDROID_HOME"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then
+            # 兼容旧目录名
+            SDKMANAGER="$ANDROID_HOME/cmdline-tools/bin/sdkmanager"
+          fi
+          echo "sdkmanager: $SDKMANAGER"
+          ls "$ANDROID_HOME" || true
+
+          # 只安装缺失的组件，已存在则跳过（幂等，减少下载）
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
+
+          # NDK：优先用已装版本，否则安装固定版本
+          NDK_DIR="$ANDROID_HOME/ndk"
+          mkdir -p "$NDK_DIR"
+          if [ -z "$(ls -A "$NDK_DIR" 2>/dev/null)" ]; then
+            "$SDKMANAGER" --install "ndk;26.1.10909125"
+            NDK_VERSION="26.1.10909125"
+          else
+            NDK_VERSION="$(ls "$NDK_DIR" | head -1)"
+            echo "复用已安装 NDK: $NDK_VERSION"
+          fi
+          echo "NDK_HOME=$NDK_DIR/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$NDK_DIR/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "最终 NDK: $NDK_DIR/$NDK_VERSION"
+          ls "$NDK_DIR/$NDK_VERSION" | head -5
 
       - name: 安装 Node.js
         uses: actions/setup-node@v4
@@ -176,3 +204,55 @@ jobs:
           path: dist-artifacts/*
           if-no-files-found: warn
           retention-days: 30
+  # ------------------------------------------------------------------
+  # 打 tag 时把移动端产物附加到已有的 Release
+  # 说明：Release 由 build.yml 创建（它负责桌面端），这里只补充移动端文件。
+  # 因此不删改 Release，仅上传 assets。
+  # ------------------------------------------------------------------
+  attach-release:
+    name: Attach to Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [android, ios]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: 下载移动端产物
+        uses: actions/download-artifact@v4
+        with:
+          path: release-files
+          merge-multiple: true
+
+      - name: 列出待上传文件
+        run: ls -lh release-files/ || true
+
+      - name: 等待 Release 就绪并上传
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          echo "目标 Release: $TAG"
+
+          # build.yml 也在同一 tag 上创建 Release，这里轮询等待其出现
+          for i in $(seq 1 60); do
+            if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+              echo "Release 已就绪"
+              break
+            fi
+            echo "[$i] Release 尚未创建，等待 20s..."
+            sleep 20
+          done
+
+          gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1 \
+            || { echo "::error::Release $TAG 未在预期时间内创建"; exit 1; }
+
+          # 上传移动端产物（--clobber 允许覆盖同名文件）
+          shopt -s nullglob
+          FILES=(release-files/*)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "::warning::没有移动端产物可上传"
+            exit 0
+          fi
+          gh release upload "$TAG" "${FILES[@]}" --clobber --repo "${{ github.repository }}"
+          echo "✅ 已上传 ${#FILES[@]} 个移动端产物"
