@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  使用 mipmap 下的 PNG 前景/背景，覆盖 Tauri 模板默认的
+  drawable/ic_launcher_background.xml 与 drawable-v24/ic_launcher_foreground.xml
+  （那两个是 Tauri 自带的 Android 机器人矢量图，会盖掉我们的图标）
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+  <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+  <background android:drawable="@color/ic_launcher_background"/>
+</adaptive-icon>

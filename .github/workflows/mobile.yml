@@ -113,11 +113,39 @@ jobs:
       - name: 初始化 Android 工程
         run: npx tauri android init --ci
 
-      # Tauri 默认产出的 release APK 是未签名的（app-universal-release-unsigned.apk），
-      # Android 系统会直接拒绝安装。这里先生成 debug.keystore，
-      # 再用 apksigner 为 release APK 签名：
-      #   - 保留 release 的优化（体积 44MB，而非 debug 的 789MB）
-      #   - 生成的包可直接安装到手机（调试签名，不可上架）
+      # 覆盖 Tauri 默认模板的两个关键点：
+      # 1) MainActivity 去掉 enableEdgeToEdge()，避免内容顶到状态栏
+      #    （Android WebView 的 env(safe-area-inset-top) 通常返回 0，纯 CSS 方案无效）
+      # 2) 自适应图标改用 mipmap 下的 PNG，覆盖模板自带的 Android 机器人矢量图
+      - name: 应用 Android 定制（状态栏避让 + 品牌图标）
+        shell: bash
+        run: |
+          set -euo pipefail
+          RES="src-tauri/gen/android/app/src/main"
+          MAIN_KT=$(find "$RES" -name "MainActivity.kt" | head -1)
+          if [ -z "$MAIN_KT" ]; then
+            echo "::error::未找到 MainActivity.kt"; exit 1
+          fi
+          PKG=$(grep -m1 "^package " "$MAIN_KT" | sed "s/^package //" | tr -d "\r")
+          echo "MainActivity: $MAIN_KT (package=$PKG)"
+          sed "s/{{PACKAGE}}/$PKG/" src-tauri/mobile/android/MainActivity.kt > "$MAIN_KT"
+          echo "--- 替换后的 MainActivity.kt ---"
+          cat "$MAIN_KT"
+
+          # 删除模板自带的 launcher 矢量图，否则会盖掉我们的图标
+          rm -f "$RES/res/drawable/ic_launcher_background.xml"
+          rm -f "$RES/res/drawable-v24/ic_launcher_foreground.xml"
+          echo "已移除模板默认 launcher drawable"
+
+          # 写回基于 mipmap PNG 的自适应图标与品牌蓝背景
+          mkdir -p "$RES/res/mipmap-anydpi-v26" "$RES/res/values"
+          cp src-tauri/mobile/android/ic_launcher.xml "$RES/res/mipmap-anydpi-v26/ic_launcher.xml"
+          cp src-tauri/mobile/android/ic_launcher_background.xml "$RES/res/values/ic_launcher_background.xml"
+          echo "--- 图标资源已就位 ---"
+          find "$RES/res" -name "ic_launcher*" | sort | head -20
+
+      # 生成调试签名密钥库：apksigner 用它给 release APK 签名，
+      # 使产物可直接安装（调试证书，不可上架）
       - name: 生成调试签名密钥库
         run: |
           mkdir -p "$HOME/.android"
