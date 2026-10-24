@@ -137,13 +137,18 @@ pub async fn disconnect(id: String, state: State<'_, AppState>) -> Result<(), St
 #[tauri::command]
 pub async fn pick_sqlite_file(app: tauri::AppHandle) -> Result<Option<String>, String> {
     use tauri_plugin_dialog::DialogExt;
-    let file = app
-        .dialog()
+    // 用回调 + oneshot 代替 blocking_pick_file：
+    // blocking_* 会阻塞主线程，在 Android/iOS 上会导致界面卡死
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
         .file()
         .add_filter("SQLite 数据库", &["db", "sqlite", "sqlite3"])
         .add_filter("所有文件", &["*"])
-        .blocking_pick_file();
-    Ok(file.and_then(|f| f.into_path().ok().map(|p| p.to_string_lossy().to_string())))
+        .pick_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx.await.map_err(|_| "文件选择已取消".to_string())?;
+    Ok(picked.and_then(|f| f.into_path().ok().map(|p| p.to_string_lossy().to_string())))
 }
 
 // ==================== 表结构管理 ====================
@@ -395,12 +400,16 @@ pub async fn export_query_to_file(
         table_name.unwrap_or_else(|| "export".to_string())
     );
 
-    let picked = app
-        .dialog()
+    // 异步回调版本，避免在移动端阻塞主线程
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
         .file()
         .set_file_name(&default_name)
         .add_filter(format.to_uppercase(), &[ext])
-        .blocking_save_file();
+        .save_file(move |path| {
+            let _ = tx.send(path);
+        });
+    let picked = rx.await.map_err(|_| "保存对话框已取消".to_string())?;
 
     let Some(path) = picked.and_then(|p| p.into_path().ok()) else {
         return Ok(None);
