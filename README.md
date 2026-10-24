@@ -349,6 +349,20 @@ npx tauri icon app-icon.manifest.json
 
 > Android 自适应图标的背景色在 `src-tauri/icons/android/values/ic_launcher_background.xml`，
 > 已设为品牌蓝 `#2563EB`，与图标主色一致。
+
+### Android 原生层覆盖（图标 / 状态栏）
+
+`tauri android init` 生成的 `src-tauri/gen/android` 有两处与 App 需求冲突，
+CI 在初始化之后统一覆盖（见 `.github/workflows/mobile.yml` 的「应用 Android 定制」步骤）：
+
+| 问题 | 原因 | 处理 |
+|------|------|------|
+| 启动器图标不是蓝色数据库图标 | 模板自带 `mipmap-*/ic_launcher.png`、`ic_launcher_foreground.png` 与 `drawable/ic_launcher_background.xml`，而 `tauri android init` 不会把 `src-tauri/icons/android` 复制进工程 | 显式 `cp` 覆盖 5 个密度的 PNG，重写 `mipmap-anydpi-v26/ic_launcher.xml` / `ic_launcher_round.xml`，删除模板机器人矢量图，最后用 `cmp` 校验 |
+| 顶部内容被状态栏压住 | Android 15（API 35）起，`targetSdk >= 35` 会被系统强制 edge-to-edge；`windowOptOutEdgeToEdgeEnforcement` 从 API 36 起也被忽略，删掉模板的 `enableEdgeToEdge()` 没有作用 | `src-tauri/mobile/android/MainActivity.kt` 按窗口 inset 给内容视图加 `paddingTop`，该条区域用品牌蓝填充 |
+
+> 这两处都是原生层行为，纯 CSS 改不动：Android WebView 的 `env(safe-area-inset-top)` 返回 `0`。
+> 因此移动端顶栏固定为 `#2563EB`（不随深色主题变化），与状态栏底色连成一体。
+
 ## 目录结构
 
 ```
