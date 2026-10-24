@@ -178,22 +178,44 @@ jobs:
       - name: 初始化 iOS 工程
         run: npx tauri ios init --ci
 
-      # 未配置签名证书时只能产出未签名产物，Xcode 会报 code signing 错误
-      - name: 构建 iOS（未签名）
-        run: npx tauri ios build --ci --no-sign
-        continue-on-error: true
+      # 未配置签名证书时无法产出可安装的 ipa。
+      # 这里分两步：先尝试无签名构建（验证代码可编译），
+      # 编译失败要让 CI 变红（不能掩盖真实错误），仅签名失败可容忍。
+      - name: 编译 iOS（无签名）
+        id: ios_build
+        run: |
+          set +e
+          npx tauri ios build --ci --no-sign 2>&1 | tee /tmp/ios_build.log
+          RC=${PIPESTATUS[0]}
+          echo "exit_code=$RC" >> "$GITHUB_OUTPUT"
+
+          # 区分「编译失败」和「仅签名失败」：签名相关错误可以放行
+          SIGNISH=0
+          grep -qiE 'requires a development team|no signing certificate|CodeSign .* failed|provisioning profile' /tmp/ios_build.log && SIGNISH=1
+
+          if [ $RC -ne 0 ]; then
+            if [ $SIGNISH -eq 1 ]; then
+              echo "::warning::iOS 构建仅因缺少签名证书失败，产物不可安装到真机"
+              echo "signed_only_failure=1" >> "$GITHUB_OUTPUT"
+            else
+              echo "::error::iOS 编译失败（非签名原因），请查看上方日志"
+              tail -40 /tmp/ios_build.log
+              exit 1
+            fi
+          else
+            echo "signed_only_failure=0" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: 收集 iOS 产物
         shell: bash
         run: |
           mkdir -p dist-artifacts
-          # 优先收集 ipa；否则收集 .app / xcarchive
+          # 优先收集 ipa
           find src-tauri/gen/apple -type f -name "*.ipa" -exec cp -v {} dist-artifacts/ \; 2>/dev/null || true
           if ! ls dist-artifacts/* >/dev/null 2>&1; then
-            echo "未生成 ipa（通常因为缺少 iOS 签名证书）。"
-            echo "如需真机安装，请配置 APPLE_CERTIFICATE 等 Secrets 并在构建命令去掉 --no-sign。"
-            # 退而收集 xcarchive 便于排查
-            find src-tauri/gen/apple -type d -name "*.xcarchive" -maxdepth 4 2>/dev/null | head -3 || true
+            echo "未生成 ipa（缺少 iOS 签名证书，属预期情况）。"
+            echo "如需真机安装，请配置 APPLE_CERTIFICATE / APPLE_SIGNING_IDENTITY 等 Secrets，"
+            echo "并把上面步骤的 --no-sign 去掉。"
           fi
           ls -lh dist-artifacts/ || true
 
