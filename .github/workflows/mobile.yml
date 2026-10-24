@@ -113,28 +113,59 @@ jobs:
       - name: 初始化 Android 工程
         run: npx tauri android init --ci
 
-      - name: 构建 APK 与 AAB
+      # release 变体需要显式签名配置，否则 Tauri 产出的是
+      # app-universal-release-unsigned.apk —— Android 系统会拒绝安装。
+      # 因此额外构建 debug 变体：Gradle 会用内置的 debug.keystore 自动签名，
+      # 产物可直接安装（调试签名，仅适合测试分发，不可上架）。
+      - name: 生成调试签名密钥库
+        run: |
+          mkdir -p "$HOME/.android"
+          if [ ! -f "$HOME/.android/debug.keystore" ]; then
+            keytool -genkeypair -v \
+              -keystore "$HOME/.android/debug.keystore" \
+              -storepass android -alias androiddebugkey -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+          echo "调试密钥库就绪: $HOME/.android/debug.keystore"
+
+      - name: 构建 release APK 与 AAB
         run: npx tauri android build --apk --aab --ci
 
-      - name: 收集产物
+      - name: 构建 debug APK（可直接安装）
+        run: npx tauri android build --apk --debug --ci
+
+      - name: 收集并重命名产物
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist-artifacts
-          # 实际路径形如:
-          #   gen/android/app/build/outputs/apk/universal/release/app-universal-release.apk
-          #   gen/android/app/build/outputs/bundle/universalRelease/app-universal-release.aab
-          #
-          # 注意：gradle 的 bundle 目录下还会有 intermediary-bundle.aab（构建中间产物，
-          # 体积大且无用途），必须排除，否则会被当成发布包上传。
-          find src-tauri/gen/android -type f \( -name "*.apk" -o -name "*.aab" \) \
-            ! -name "intermediary-*" \
+          OUT="src-tauri/gen/android/app/build/outputs"
+
+          # ---- 可直接安装的 APK（debug 签名）----
+          # 路径形如: apk/universal/debug/app-universal-debug.apk
+          DEBUG_APK=$(find "$OUT" -type f -name "*.apk" -path "*/debug/*" | head -1 || true)
+          if [ -n "$DEBUG_APK" ]; then
+            cp -v "$DEBUG_APK" "dist-artifacts/TauriSQLManager_$(git describe --tags --always 2>/dev/null || echo dev)-installable.apk"
+          fi
+
+          # ---- release APK（未签名，若已配置签名则可用）----
+          RELEASE_APK=$(find "$OUT" -type f -name "*.apk" -path "*/release/*" | head -1 || true)
+          if [ -n "$RELEASE_APK" ]; then
+            cp -v "$RELEASE_APK" "dist-artifacts/TauriSQLManager_$(git describe --tags --always 2>/dev/null || echo dev)-release-unsigned.apk"
+          fi
+
+          # ---- AAB（上架 Google Play 用，排除中间产物）----
+          find "$OUT" -type f -name "*.aab" ! -name "intermediary-*" \
             -exec cp -v {} dist-artifacts/ \; 2>/dev/null || true
-          echo "--- 产物 ---"
+
+          echo "--- 产物清单 ---"
           ls -lh dist-artifacts/ || true
-          if ! ls dist-artifacts/* >/dev/null 2>&1; then
-            echo "::error::未生成 APK/AAB，请检查 gradle 输出目录"
-            find src-tauri/gen/android -name "outputs" -type d 2>/dev/null | head -5
+
+          # 必须至少有一个可安装的 APK，否则本次构建对用户无价值
+          if ! ls dist-artifacts/*.apk >/dev/null 2>&1; then
+            echo "::error::未生成任何 APK"
+            find "$OUT" -name "*.apk" 2>/dev/null | head -10
             exit 1
           fi
 
@@ -272,6 +303,15 @@ jobs:
           gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1 \
             || { echo "::error::Release $TAG 未在预期时间内创建"; exit 1; }
 
+          # 先清理旧的 Android 产物（避免残留 unsigned APK 混淆用户）
+          ASSETS=$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets --jq ".assets[].name" 2>/dev/null || true)
+          for OLD in app-universal-release-unsigned.apk app-universal-release.aab intermediary-bundle.aab app-universal-debug.apk; do
+            if echo "$ASSETS" | grep -qx "$OLD"; then
+              echo "删除旧文件: $OLD"
+              gh release delete-asset "$TAG" "$OLD" -y --repo "${{ github.repository }}" 2>/dev/null || true
+            fi
+          done
+
           # 上传移动端产物（--clobber 允许覆盖同名文件）
           shopt -s nullglob
           FILES=(release-files/*)
@@ -281,3 +321,6 @@ jobs:
           fi
           gh release upload "$TAG" "${FILES[@]}" --clobber --repo "${{ github.repository }}"
           echo "✅ 已上传 ${#FILES[@]} 个移动端产物"
+
+          echo "--- Release 现有资产 ---"
+          gh release view "$TAG" --repo "${{ github.repository }}" --json assets --jq ".assets[] | .name + \"  \" + (.size|tostring)"
