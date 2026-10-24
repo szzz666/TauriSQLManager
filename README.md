@@ -123,15 +123,38 @@ CI 会自动构建四个平台并在 Releases 页面生成下载链接。
 >
 > 推送后 CI 会完整跑一遍 4 平台构建，然后自动创建 Release 并附加全部安装包。
 
-### 代码签名（可选，发布正式版建议配置）
+### macOS 签名说明（重要）
+
+本项目默认使用 **ad-hoc 签名**（`signingIdentity: "-"`），这足以让 app 在不同机器上
+正常安装和运行，**不会**出现「已损坏，无法打开」。
+
+ad-hoc 签名解决的问题是：没有 `Contents/_CodeSignature/CodeResources` 的 app 被下载后会
+带上 `com.apple.quarantine` 隔离属性，Gatekeeper 校验失败会直接报「已损坏」（而不是
+可放行的「未验证开发者」提示）。
+
+首次打开时可能出现 **「无法验证开发者」**，这是未使用 Apple 开发者证书的正常提示，
+处理方式二选一：
+
+```bash
+# 方式 1（推荐）：右键点击 app → 打开 → 在弹窗中点击「打开」
+# 方式 2：命令行移除隔离属性
+xattr -dr com.apple.quarantine "/Applications/Tauri SQL Manager.app"
+```
+
+> 注意区分两种错误：
+> - **「无法验证开发者」** = 正常现象，按上面方式放行即可
+> - **「已损坏，无法打开」** = 签名无效（本项目已修复，即缺少 CodeResources 的情况）
+
+### 正式分发（可选）
+
+若要通过 Apple 公证（notarization）消除上述提示，需配置 Secrets：
 
 | 平台 | 需要的 Secrets |
 |------|---------------|
 | macOS | `APPLE_CERTIFICATE`、`APPLE_CERTIFICATE_PASSWORD`、`APPLE_SIGNING_IDENTITY`、`APPLE_ID`、`APPLE_PASSWORD`、`APPLE_TEAM_ID` |
 | Windows | `TAURI_SIGNING_PRIVATE_KEY`、`TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
 
-未配置签名时安装包仍可构建，但 macOS 首次打开需在「系统设置 → 隐私与安全性」中允许，
-Windows 会提示 SmartScreen 警告。
+配置后 Tauri 会在构建时自动签名并公证，用户双击即可打开，无任何提示。
 
 ## 测试
 
