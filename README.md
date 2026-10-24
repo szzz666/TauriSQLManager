@@ -105,8 +105,23 @@ CI 会自动构建四个平台并在 Releases 页面生成下载链接。
 
 ### 下载安装包
 
-- **最新开发版**：仓库 `Actions` → 选择对应运行记录 → 页面底部 `Artifacts`
-- **正式发布版**：仓库 `Releases` 页面
+有两种获取方式，对应不同的触发条件：
+
+| 来源 | 触发条件 | 位置 | 保留期 |
+|------|----------|------|--------|
+| **Actions Artifacts** | 每次 push / PR / 手动触发 | `Actions` → 运行记录 → 页面底部 `Artifacts` | 30 天 |
+| **Releases** | **仅推送 `v*` tag** | `Releases` 页面 | 永久 |
+
+> ⚠️ 常见疑问：**只 push 代码到 main 时 Releases 页面不会出现安装包**，这是设计如此。
+> 因为 `release` job 的条件是 `startsWith(github.ref, 'refs/tags/v')`。
+> 想让安装包进入 Releases，必须打 tag 并推送：
+>
+> ```bash
+> git tag -a v1.0.0 -m "v1.0.0"
+> git push origin v1.0.0
+> ```
+>
+> 推送后 CI 会完整跑一遍 4 平台构建，然后自动创建 Release 并附加全部安装包。
 
 ### 代码签名（可选，发布正式版建议配置）
 
