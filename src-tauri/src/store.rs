@@ -68,6 +68,7 @@ pub fn reload_for_test() {
 /// 初始化全局存储（在应用启动时调用一次）
 pub fn init() -> &'static Mutex<Store> {
     STORE.get_or_init(|| {
+        migrate_legacy_config();
         let connections = load_connections();
         let settings = load_settings();
         Mutex::new(Store {
@@ -75,6 +76,43 @@ pub fn init() -> &'static Mutex<Store> {
             settings,
         })
     })
+}
+
+/// 旧版配置目录名（1.0.1 及更早使用 dirs::data_dir + 该名称）
+const LEGACY_DIR_NAME: &str = "tauri-sql-manager";
+
+/// 从旧目录迁移配置到当前目录。
+/// v1.0.2 起数据目录改用 Tauri 的 app_data_dir（基于 identifier），
+/// 路径发生变化：.../Application Support/tauri-sql-manager
+///            -> .../Application Support/top.szzz666.taurisqlmanager
+/// 若不迁移，老用户升级后会看到「连接全部丢失」。
+fn migrate_legacy_config() {
+    // 仅在当前目录还没有配置文件时才迁移，避免覆盖用户已有数据
+    if connections_path().exists() || settings_path().exists() {
+        return;
+    }
+    let Some(base) = dirs::data_dir() else {
+        return;
+    };
+    let legacy = base.join(LEGACY_DIR_NAME);
+    if legacy == data_dir() || !legacy.exists() {
+        return;
+    }
+
+    let mut migrated = Vec::new();
+    for name in ["connections.json", "settings.json"] {
+        let from = legacy.join(name);
+        let to = data_dir().join(name);
+        if from.exists() && !to.exists() {
+            match fs::copy(&from, &to) {
+                Ok(_) => migrated.push(name),
+                Err(e) => eprintln!("迁移 {name} 失败: {e}"),
+            }
+        }
+    }
+    if !migrated.is_empty() {
+        eprintln!("已从旧配置目录迁移: {}", migrated.join(", "));
+    }
 }
 
 fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Option<T> {
