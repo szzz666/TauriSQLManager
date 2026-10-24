@@ -113,10 +113,11 @@ jobs:
       - name: 初始化 Android 工程
         run: npx tauri android init --ci
 
-      # release 变体需要显式签名配置，否则 Tauri 产出的是
-      # app-universal-release-unsigned.apk —— Android 系统会拒绝安装。
-      # 因此额外构建 debug 变体：Gradle 会用内置的 debug.keystore 自动签名，
-      # 产物可直接安装（调试签名，仅适合测试分发，不可上架）。
+      # Tauri 默认产出的 release APK 是未签名的（app-universal-release-unsigned.apk），
+      # Android 系统会直接拒绝安装。这里先生成 debug.keystore，
+      # 再用 apksigner 为 release APK 签名：
+      #   - 保留 release 的优化（体积 44MB，而非 debug 的 789MB）
+      #   - 生成的包可直接安装到手机（调试签名，不可上架）
       - name: 生成调试签名密钥库
         run: |
           mkdir -p "$HOME/.android"
@@ -132,8 +133,42 @@ jobs:
       - name: 构建 release APK 与 AAB
         run: npx tauri android build --apk --aab --ci
 
-      - name: 构建 debug APK（可直接安装）
-        run: npx tauri android build --apk --debug --ci
+      # 用 apksigner 给 release APK 签名（debug 变体体积达 789MB，不适合分发）
+      # 这样得到的包：44MB、release 优化、可直接安装
+      - name: 签名 release APK（可直接安装）
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="src-tauri/gen/android/app/build/outputs"
+          APK=$(find "$OUT" -type f -name "*.apk" -path "*/release/*" | head -1 || true)
+          if [ -z "$APK" ]; then
+            echo "::error::未找到 release APK"
+            exit 1
+          fi
+          echo "待签名 APK: $APK"
+
+          # 定位 apksigner（build-tools 版本目录不固定）
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f 2>/dev/null | sort -V | tail -1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::未找到 apksigner"
+            ls "$ANDROID_HOME/build-tools" 2>/dev/null || true
+            exit 1
+          fi
+          echo "apksigner: $APKSIGNER"
+
+          # 签名（v1+v2+v3，兼容旧设备）
+          "$APKSIGNER" sign \
+            --ks "$HOME/.android/debug.keystore" \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --ks-key-alias androiddebugkey \
+            --v1-signing-enabled true \
+            --v2-signing-enabled true \
+            --v3-signing-enabled true \
+            "$APK"
+
+          echo "--- 校验签名 ---"
+          "$APKSIGNER" verify --verbose "$APK" | head -12
 
       - name: 收集并重命名产物
         shell: bash
@@ -142,8 +177,6 @@ jobs:
           mkdir -p dist-artifacts
           OUT="src-tauri/gen/android/app/build/outputs"
 
-          # ---- 可直接安装的 APK（debug 签名）----
-          # 路径形如: apk/universal/debug/app-universal-debug.apk
           # 版本号优先取 tag（CI 中 GITHUB_REF_NAME 在 tag 触发时即为 v1.0.3），
           # 避免 shallow clone 下 git describe 取不到 tag
           VER="${GITHUB_REF_NAME:-}"
@@ -154,15 +187,10 @@ jobs:
           [ -n "$VER" ] || VER="dev"
           echo "产物版本标识: $VER"
 
-          DEBUG_APK=$(find "$OUT" -type f -name "*.apk" -path "*/debug/*" | head -1 || true)
-          if [ -n "$DEBUG_APK" ]; then
-            cp -v "$DEBUG_APK" "dist-artifacts/TauriSQLManager_${VER}-installable.apk"
-          fi
-
-          # ---- release APK（未签名，若已配置签名则可用）----
+          # release APK 已在上一步用 apksigner 签过名，可直接安装
           RELEASE_APK=$(find "$OUT" -type f -name "*.apk" -path "*/release/*" | head -1 || true)
           if [ -n "$RELEASE_APK" ]; then
-            cp -v "$RELEASE_APK" "dist-artifacts/TauriSQLManager_${VER}-release-unsigned.apk"
+            cp -v "$RELEASE_APK" "dist-artifacts/TauriSQLManager_${VER}-installable.apk"
           fi
 
           # ---- AAB（上架 Google Play 用，排除中间产物）----
