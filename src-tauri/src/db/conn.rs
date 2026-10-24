@@ -100,9 +100,12 @@ pub async fn open(config: &ConnectionConfig) -> Result<Db, String> {
             if config.database.trim().is_empty() {
                 return Err("请选择 SQLite 数据库文件".to_string());
             }
+            // create_if_missing(true)：移动端（Android/iOS）是沙箱环境，
+            // 用户无法预先放入 .db 文件，必须允许自动创建新库。
+            // 桌面端该行为同样合理：输入新路径即新建数据库。
             let opts = sqlx::sqlite::SqliteConnectOptions::new()
                 .filename(&config.database)
-                .create_if_missing(false)
+                .create_if_missing(true)
                 .foreign_keys(true);
             let pool = SqlitePool::connect_with(opts)
                 .await
@@ -167,12 +170,15 @@ fn encode(s: &str) -> String {
 pub async fn test_connect(config: &ConnectionConfig) -> Result<String, String> {
     match config.db_type {
         DbType::Sqlite => {
-            if !std::path::Path::new(&config.database).exists() {
-                return Err(format!("SQLite 文件不存在: {}", config.database));
+            if config.database.trim().is_empty() {
+                return Err("请选择 SQLite 数据库文件".to_string());
             }
+            // 允许自动创建：移动端沙箱内用户无法预置 .db 文件，
+            // 若强制要求文件已存在，新建连接会永远测试失败。
+            let existed = std::path::Path::new(&config.database).exists();
             let opts = sqlx::sqlite::SqliteConnectOptions::new()
                 .filename(&config.database)
-                .read_only(true);
+                .create_if_missing(true);
             let pool = SqlitePool::connect_with(opts)
                 .await
                 .map_err(|e| format!("打开 SQLite 数据库失败: {e}"))?;
@@ -181,7 +187,8 @@ pub async fn test_connect(config: &ConnectionConfig) -> Result<String, String> {
                 .await
                 .map_err(|e| format!("执行测试查询失败: {e}"))?;
             pool.close().await;
-            Ok(format!("SQLite {version}"))
+            let suffix = if existed { "" } else { "（文件不存在，已自动创建空库）" };
+            Ok(format!("SQLite {version}{suffix}"))
         }
         DbType::Mysql | DbType::Mariadb => {
             let pool = sqlx::mysql::MySqlPoolOptions::new()
