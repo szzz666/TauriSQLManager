@@ -360,6 +360,26 @@ sqlx 每种驱动有独立的类型系统。`exec.rs` 统一把结果集转换�
 包含 `connections.json`（连接，**含明文密码**，请注意权限）与 `settings.json`。
 写入采用「临时文件 + 重命名」，避免中途崩溃损坏配置。
 
+### 配置目录变更说明（v1.0.2）
+
+v1.0.1 及更早版本使用 `…/tauri-sql-manager/`，v1.0.2 起改用
+**基于应用 identifier** 的目录（这是修复移动端存储所必需的）：
+
+| 版本 | 目录 |
+|------|------|
+| ≤ v1.0.1 | `~/Library/Application Support/tauri-sql-manager/` |
+| ≥ v1.0.2 | `~/Library/Application Support/top.szzz666.taurisqlmanager/` |
+
+升级后首次启动会**自动迁移**旧配置（仅复制，不删除原文件）。
+若迁移失败，也可手动复制：
+
+```bash
+cp -r "$HOME/Library/Application Support/tauri-sql-manager/"* \
+      "$HOME/Library/Application Support/top.szzz666.taurisqlmanager/"
+```
+
+强制指定目录（测试或多实例）：设置环境变量 `TSM_DATA_DIR`。
+
 ## 从 WebSQLManager 迁移
 
 本项目**不自动读取**旧版 `connections.json`（JDBC URL 到结构化字段的映射存在歧义）。
