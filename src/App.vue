@@ -467,9 +467,11 @@ function toggleTheme() {
     }
   }
 
-  /* 移动端：顶栏改用品牌色背景。
-     Android enableEdgeToEdge 默认使用浅色状态栏图标，
-     若顶栏是白底会导致状态栏文字看不见。 */
+  /* 移动端：顶栏固定品牌蓝。
+     必须和 MainActivity.kt 里的状态栏底色（#2563EB）完全一致：
+     Android 15 起系统强制 edge-to-edge，状态栏那一条由原生层用这个蓝色填充，
+     两者不同色就会露出一条明显的色带。
+     所以这里不做深色主题切换（深色下顶栏仍是品牌蓝）。 */
   .app-header {
     padding: 0 8px;
     background: #2563EB;
@@ -505,10 +507,4 @@ function toggleTheme() {
   }
 }
 
-/* 移动端深色主题：顶栏用更深的品牌色，与状态栏图标匹配 */
-@media (max-width: 768px) {
-  html.dark .app-header {
-    background: #1E3A8A;
-  }
-}
 </style>

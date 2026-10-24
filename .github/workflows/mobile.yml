@@ -113,16 +113,21 @@ jobs:
       - name: 初始化 Android 工程
         run: npx tauri android init --ci
 
-      # 覆盖 Tauri 默认模板的两个关键点：
-      # 1) MainActivity 去掉 enableEdgeToEdge()，避免内容顶到状态栏
-      #    （Android WebView 的 env(safe-area-inset-top) 通常返回 0，纯 CSS 方案无效）
-      # 2) 自适应图标改用 mipmap 下的 PNG，覆盖模板自带的 Android 机器人矢量图
+      # 覆盖 Tauri 默认模板的三处关键行为：
+      # 1) MainActivity：Android 15 起 targetSdk>=35 会被强制 edge-to-edge，
+      #    只删掉 enableEdgeToEdge() 没用，必须自己按窗口 inset 补 padding；
+      # 2) 图标：tauri android init 生成的是 Tauri 官方模板图标（青黄双环），
+      #    不会自动使用 src-tauri/icons/android，必须显式覆盖；
+      # 3) 模板自带的 drawable 矢量图标会盖掉 mipmap，需要删除。
       - name: 应用 Android 定制（状态栏避让 + 品牌图标）
         shell: bash
         run: |
           set -euo pipefail
-          RES="src-tauri/gen/android/app/src/main"
-          MAIN_KT=$(find "$RES" -name "MainActivity.kt" | head -1)
+          APP="src-tauri/gen/android/app/src/main"
+          RES="$APP/res"
+
+          # ---------- 1. MainActivity ----------
+          MAIN_KT=$(find "$APP" -name "MainActivity.kt" | head -1)
           if [ -z "$MAIN_KT" ]; then
             echo "::error::未找到 MainActivity.kt"; exit 1
           fi
@@ -132,17 +137,31 @@ jobs:
           echo "--- 替换后的 MainActivity.kt ---"
           cat "$MAIN_KT"
 
-          # 删除模板自带的 launcher 矢量图，否则会盖掉我们的图标
-          rm -f "$RES/res/drawable/ic_launcher_background.xml"
-          rm -f "$RES/res/drawable-v24/ic_launcher_foreground.xml"
-          echo "已移除模板默认 launcher drawable"
+          # ---------- 2. 图标：用 src-tauri/icons/android 覆盖模板图标 ----------
+          for DPI in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            mkdir -p "$RES/mipmap-$DPI"
+            cp -f "src-tauri/icons/android/mipmap-$DPI/"*.png "$RES/mipmap-$DPI/"
+          done
+          mkdir -p "$RES/mipmap-anydpi-v26" "$RES/values"
+          cp -f src-tauri/mobile/android/ic_launcher.xml "$RES/mipmap-anydpi-v26/ic_launcher.xml"
+          cp -f src-tauri/mobile/android/ic_launcher.xml "$RES/mipmap-anydpi-v26/ic_launcher_round.xml"
+          cp -f src-tauri/mobile/android/ic_launcher_background.xml "$RES/values/ic_launcher_background.xml"
 
-          # 写回基于 mipmap PNG 的自适应图标与品牌蓝背景
-          mkdir -p "$RES/res/mipmap-anydpi-v26" "$RES/res/values"
-          cp src-tauri/mobile/android/ic_launcher.xml "$RES/res/mipmap-anydpi-v26/ic_launcher.xml"
-          cp src-tauri/mobile/android/ic_launcher_background.xml "$RES/res/values/ic_launcher_background.xml"
-          echo "--- 图标资源已就位 ---"
-          find "$RES/res" -name "ic_launcher*" | sort | head -20
+          # 模板自带的机器人矢量图会盖掉 mipmap，删掉
+          rm -f "$RES/drawable/ic_launcher_background.xml"
+          rm -f "$RES/drawable-v24/ic_launcher_foreground.xml"
+
+          # ---------- 3. 校验：图标必须真的被覆盖 ----------
+          for DPI in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            if ! cmp -s "src-tauri/icons/android/mipmap-$DPI/ic_launcher.png" "$RES/mipmap-$DPI/ic_launcher.png"; then
+              echo "::error::mipmap-$DPI/ic_launcher.png 覆盖失败"; exit 1
+            fi
+            if ! cmp -s "src-tauri/icons/android/mipmap-$DPI/ic_launcher_foreground.png" "$RES/mipmap-$DPI/ic_launcher_foreground.png"; then
+              echo "::error::mipmap-$DPI/ic_launcher_foreground.png 覆盖失败"; exit 1
+            fi
+          done
+          echo "✅ 图标已覆盖（5 个密度 + 自适应图标 + 品牌蓝背景）"
+          find "$RES" -name "ic_launcher*" | sort
 
       # 生成调试签名密钥库：apksigner 用它给 release APK 签名，
       # 使产物可直接安装（调试证书，不可上架）
