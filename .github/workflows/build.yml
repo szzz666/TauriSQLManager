@@ -143,6 +143,19 @@ jobs:
       - name: 构建并打包
         run: npm run tauri build -- --target ${{ matrix.target }} --bundles ${{ matrix.bundles }}
 
+      # macOS 产物必须带有效 bundle 签名，否则用户下载后会提示"已损坏"
+      - name: 校验 macOS 签名
+        if: matrix.os == 'macos-latest'
+        run: |
+          APP="src-tauri/target/${{ matrix.target }}/release/bundle/macos/Tauri SQL Manager.app"
+          echo "--- 签名详情 ---"
+          codesign -dv "$APP" 2>&1 | grep -E 'Identifier|Signature' || true
+          echo "--- 严格校验 ---"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          echo "--- _CodeSignature 必须存在 ---"
+          test -f "$APP/Contents/_CodeSignature/CodeResources" \
+            || { echo "::error::app bundle 没有 CodeResources，签名无效，用户会看到"已损坏""; exit 1; }
+
       - name: 收集构建产物
         shell: bash
         run: |
@@ -155,6 +168,11 @@ jobs:
           \) -exec cp -v {} dist-artifacts/ \;
           echo '--- 产物清单 ---'
           ls -lh dist-artifacts/
+          # 产物为空视为失败，避免"假成功"
+          if ! ls dist-artifacts/* >/dev/null 2>&1; then
+            echo "::error::构建完成但没有生成任何安装包"
+            exit 1
+          fi
 
       - name: 上传构建产物
         uses: actions/upload-artifact@v4
