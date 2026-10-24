@@ -467,8 +467,26 @@ function toggleTheme() {
     }
   }
 
+  /* 移动端：顶栏改用品牌色背景。
+     Android enableEdgeToEdge 默认使用浅色状态栏图标，
+     若顶栏是白底会导致状态栏文字看不见。 */
   .app-header {
     padding: 0 8px;
+    background: #2563EB;
+    border-bottom-color: transparent;
+    color: #fff;
+
+    :deep(.el-button) {
+      color: #fff;
+    }
+
+    :deep(.el-icon) {
+      color: #fff;
+    }
+
+    :deep(.logo-text) {
+      color: #fff;
+    }
   }
 
   .logo-text {
@@ -484,6 +502,13 @@ function toggleTheme() {
   /* 移动端紧凑间距 */
   .page-container {
     padding: 12px 10px;
+  }
+}
+
+/* 移动端深色主题：顶栏用更深的品牌色，与状态栏图标匹配 */
+@media (max-width: 768px) {
+  html.dark .app-header {
+    background: #1E3A8A;
   }
 }
 </style>
