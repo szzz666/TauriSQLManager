@@ -1,7 +1,7 @@
 {
   "name": "tauri-sql-manager",
   "private": true,
-  "version": "1.0.8",
+  "version": "1.0.9",
   "type": "module",
   "description": "基于 Tauri 2 + Vue 3 + Element Plus 的数据库管理桌面应用",
   "scripts": {
