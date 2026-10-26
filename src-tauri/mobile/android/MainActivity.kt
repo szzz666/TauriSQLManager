@@ -50,7 +50,7 @@ class MainActivity : TauriActivity() {
 
     // 状态栏图标用白色，配合品牌蓝底（两种写法都清掉 LIGHT_STATUS_BAR 标志）
     if (Build.VERSION.SDK_INT >= 30) {
-      window.insetsController?.setSystemBarsAppearance(
+      decor.windowInsetsController?.setSystemBarsAppearance(
         0,
         WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS,
       )

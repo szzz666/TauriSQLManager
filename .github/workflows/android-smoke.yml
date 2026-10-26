@@ -1,8 +1,14 @@
 name: Android Smoke Test
 
-# 在真实 Android 模拟器上安装 APK 并启动，抓取 logcat 与截图。
-# 用途：图标 / 状态栏这类原生层改动无法靠「CI 构建通过」验证。
-# v1.0.8 构建全绿但装上后崩溃/图标不对，就是这么漏掉的。
+# 在真实 Android 模拟器上安装并启动，抓 logcat 与截图。
+#
+# 两种模式：
+#   source=build   —— 从当前 commit 构建 APK（发布前验证，推荐）
+#   source=release —— 下载指定 tag 的 Release APK（回归验证）
+#
+# 为什么需要它：图标 / 状态栏 / 启动崩溃都是原生层问题，
+# 「CI 构建通过」完全不代表「装上能跑」。v1.0.8 构建全绿但一装就闪退，
+# 就是靠这个 workflow 的堆栈才定位到的。
 
 on:
   push:
@@ -10,21 +16,31 @@ on:
     paths:
       - ".github/workflows/android-smoke.yml"
       - "scripts/android-smoke.sh"
+      - "src-tauri/mobile/android/**"
   workflow_dispatch:
     inputs:
-      tag:
-        description: "要测试的 Release tag"
+      source:
+        description: "APK 来源"
         required: true
-        default: v1.0.8
+        default: build
+        type: choice
+        options: [build, release]
+      tag:
+        description: "source=release 时的 Release tag"
+        required: false
+        default: v1.0.9
 
 concurrency:
   group: android-smoke-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
   smoke:
     name: Smoke API ${{ matrix.api }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     permissions:
       contents: read
     strategy:
@@ -34,25 +50,108 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 下载待测 APK
+      # ---------------- 从 release 下载 ----------------
+      - name: 下载 Release APK
+        if: inputs.source == 'release'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG_INPUT: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          TAG="${TAG_INPUT:-v1.0.8}"
-          echo "测试 $TAG 的 APK"
+          TAG="${TAG_INPUT:-v1.0.9}"
+          echo "下载 $TAG 的 APK"
           mkdir -p apk
           gh release download "$TAG" --repo "${{ github.repository }}" \
             --pattern "*-installable.apk" --dir apk --clobber
           ls -lh apk/
 
+      # ---------------- 从源码构建 ----------------
+      - name: 安装系统依赖
+        if: inputs.source == 'build'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev \
+            librsvg2-dev patchelf libssl-dev build-essential
+
+      - name: 安装 JDK 17
+        if: inputs.source == 'build'
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: 配置 Android SDK 与 NDK
+        if: inputs.source == 'build'
+        run: |
+          set -euo pipefail
+          export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SDKMANAGER" ] || SDKMANAGER="$ANDROID_HOME/cmdline-tools/bin/sdkmanager"
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" --install "platform-tools" "platforms;android-34" "build-tools;34.0.0" || true
+          NDK_DIR="$ANDROID_HOME/ndk"
+          mkdir -p "$NDK_DIR"
+          if [ -z "$(ls -A "$NDK_DIR" 2>/dev/null)" ]; then
+            "$SDKMANAGER" --install "ndk;26.1.10909125"
+            NDK_VERSION="26.1.10909125"
+          else
+            NDK_VERSION="$(ls "$NDK_DIR" | head -1)"
+          fi
+          echo "NDK_HOME=$NDK_DIR/$NDK_VERSION" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$NDK_DIR/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: 安装 Node.js
+        if: inputs.source == 'build'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - name: 安装 Rust 与 Android target
+        if: inputs.source == 'build'
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+
+      - name: 缓存 Cargo
+        if: inputs.source == 'build'
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          key: android-smoke
+
+      - name: 安装前端依赖
+        if: inputs.source == 'build'
+        run: npm ci
+
+      - name: 初始化 Android 工程并应用定制
+        if: inputs.source == 'build'
+        run: bash scripts/android-customize.sh
+
+      - name: 生成调试密钥库
+        if: inputs.source == 'build'
+        run: |
+          mkdir -p "$HOME/.android"
+          keytool -genkeypair -v \
+            -keystore "$HOME/.android/debug.keystore" \
+            -storepass android -alias androiddebugkey -keypass android \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: 构建并签名 APK
+        if: inputs.source == 'build'
+        run: bash scripts/android-build.sh
+
+      # ---------------- 模拟器验证 ----------------
       - name: 启用 KVM
         run: |
           echo "KVM: $(ls -l /dev/kvm 2>/dev/null || echo none)"
           sudo chmod 666 /dev/kvm 2>/dev/null || true
 
-      - name: 模拟器启动并安装运行
+      - name: 模拟器启动并运行
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
