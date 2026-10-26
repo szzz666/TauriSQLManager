@@ -282,18 +282,26 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           echo "目标 Release: $TAG"
 
-          # build.yml 也在同一 tag 上创建 Release，这里轮询等待其出现
-          for i in $(seq 1 60); do
+          # build.yml 也在同一 tag 上创建 Release，这里轮询等待其出现。
+          # 注意：desktop 四个平台（含 Linux AppImage 打包）通常要 30 分钟才走到
+          # Release 步骤，而移动端 12 分钟左右就构建完了 —— 等待窗口必须比 desktop
+          # 全程更长。v1.0.10 曾用 60 次 × 20s = 20 分钟，只差一分钟没等到，
+          # 导致 APK/IPA 没能上传，故放宽到 180 次 × 20s = 60 分钟。
+          READY=0
+          for i in $(seq 1 180); do
             if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-              echo "Release 已就绪"
+              echo "Release 已就绪（第 $i 次探测）"
+              READY=1
               break
             fi
-            echo "[$i] Release 尚未创建，等待 20s..."
+            echo "[$i/180] Release 尚未创建，等待 20s..."
             sleep 20
           done
 
-          gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1 \
-            || { echo "::error::Release $TAG 未在预期时间内创建"; exit 1; }
+          if [ "$READY" != "1" ]; then
+            echo "::error::Release $TAG 未在 60 分钟内创建"
+            exit 1
+          fi
 
           # 先清理旧的 Android 产物（避免残留 unsigned APK 混淆用户）
           ASSETS=$(gh release view "$TAG" --repo "${{ github.repository }}" --json assets --jq ".assets[].name" 2>/dev/null || true)
