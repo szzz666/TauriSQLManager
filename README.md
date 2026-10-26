@@ -358,10 +358,36 @@ CI 在初始化之后统一覆盖（见 `.github/workflows/mobile.yml` 的「应
 | 问题 | 原因 | 处理 |
 |------|------|------|
 | 启动器图标不是蓝色数据库图标 | 模板自带 `mipmap-*/ic_launcher.png`、`ic_launcher_foreground.png` 与 `drawable/ic_launcher_background.xml`，而 `tauri android init` 不会把 `src-tauri/icons/android` 复制进工程 | 显式 `cp` 覆盖 5 个密度的 PNG，重写 `mipmap-anydpi-v26/ic_launcher.xml` / `ic_launcher_round.xml`，删除模板机器人矢量图，最后用 `cmp` 校验 |
-| 顶部内容被状态栏压住 | Android 15（API 35）起，`targetSdk >= 35` 会被系统强制 edge-to-edge；`windowOptOutEdgeToEdgeEnforcement` 从 API 36 起也被忽略，删掉模板的 `enableEdgeToEdge()` 没有作用 | `src-tauri/mobile/android/MainActivity.kt` 按窗口 inset 给内容视图加 `paddingTop`，该条区域用品牌蓝填充 |
+| 顶部内容被状态栏压住 | Android 15（API 35）起，`targetSdk >= 35` 会被系统强制 edge-to-edge；`windowOptOutEdgeToEdgeEnforcement` 从 API 36 起也被忽略 | 用 `src-tauri/mobile/android/MainActivity.kt` 覆盖模板的 `MainActivity.kt`（模板里硬编码了 `enableEdgeToEdge()`），**按 API 级别分流**：API ≥ 35 用 `setOnApplyWindowInsetsListener` 给内容视图加 `paddingTop`（状态栏区域填品牌蓝）；API < 35 系统本来就会让位，只设 `window.statusBarColor` 与浅色状态栏图标，**绝不能**也加 inset 监听——否则持续重排会触发 ANR |
 
 > 这两处都是原生层行为，纯 CSS 改不动：Android WebView 的 `env(safe-area-inset-top)` 返回 `0`。
 > 因此移动端顶栏固定为 `#2563EB`（不随深色主题变化），与状态栏底色连成一体。
+
+> 写 `MainActivity.kt` 的坑：`onCreate` 阶段 `DecorView` 还没创建，此时访问 `window.insetsController`
+> 会抛 `NullPointerException`（`PhoneWindow.getInsetsController` 直接解引用 `mDecor`，Kotlin 的 `?.` 挡不住）。
+> 必须先 `val decor: View = window.decorView` 触发 `installDecor()`，再操作 inset。
+
+### 本地补丁：wry（Android 冷启动崩溃）
+
+`src-tauri/vendor/wry` 是 crates.io 上 `wry 0.57.0` 的副本，只改了一处，用来修一个上游 bug。
+
+**症状**：Android 冷启动偶发闪退，logcat 里是
+
+```
+E RustPanic: called `Result::unwrap()` on an `Err` value: "SendError(..)"
+F libc: Fatal signal 6 (SIGABRT)
+```
+
+**成因**：`wry/src/android/mod.rs` 的 `platform_webview_version()` 用 `rx.recv_timeout(MAIN_PIPE_TIMEOUT)`
+等主线程回包，`MAIN_PIPE_TIMEOUT = 10s`。冷启动首次加载 WebView provider 一旦超过 10 秒
+（低端机、模拟器、系统正忙时都会），接收端被 drop，而主线程侧的 `main_pipe.rs` 仍然执行
+`tx.send(Ok(version)).unwrap()`，必然拿到 `SendError` → panic → 整个进程被杀。
+上游 0.57.1 也没修（改动只有 rustfmt 风格迁移）。
+
+**处理**：把这 4 处 `tx.send(..).unwrap()` 改成 `let _ = tx.send(..)`（发送失败忽略即可），
+并在 `src-tauri/Cargo.toml` 用 `[patch.crates-io]` 指向本地副本。补丁处均有 `// [本地补丁]` 注释。
+
+> 这份副本会随仓库一起提交，CI 无需额外步骤；升级 wry 时先确认上游已修，再删掉 `vendor/wry` 与 `[patch.crates-io]`。
 
 ## 目录结构
 

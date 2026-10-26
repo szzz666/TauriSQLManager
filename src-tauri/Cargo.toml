@@ -1,6 +1,6 @@
 [package]
 name = "tauri-sql-manager"
-version = "1.0.10"
+version = "1.0.11"
 description = "基于 Tauri 2 的数据库管理桌面应用"
 authors = ["szzz666"]
 edition = "2021"
@@ -47,3 +47,20 @@ codegen-units = 1
 lto = true
 opt-level = "s"
 strip = true
+
+# ---------------------------------------------------------------
+# 本地补丁：wry 0.57 的 Android 主线程管道在高负载设备上会 panic
+#
+# wry-0.57.0/src/android/mod.rs 的 platform_webview_version() 用
+#   rx.recv_timeout(MAIN_PIPE_TIMEOUT)   // MAIN_PIPE_TIMEOUT = 10s
+# 等主线程管道回包；超时后 rx 被丢弃，而 main_pipe.rs 那边仍然执行
+#   tx.send(Ok(version)).unwrap()
+# 必然得到 SendError(..) → panic → SIGABRT，整个应用直接闪退。
+#
+# 触发条件很现实：冷启动首次加载 WebView provider 超过 10 秒（模拟器、
+# 低端机、系统正忙时都会），实测在 BlueStacks 上反复复现。
+# wry 0.57.1 也没修，所以把 crates.io 的 wry 换成 vendor/wry，
+# 仅把这几处 unwrap 改成忽略发送失败（见该文件里的 [本地补丁] 注释）。
+# ---------------------------------------------------------------
+[patch.crates-io]
+wry = { path = "vendor/wry" }
