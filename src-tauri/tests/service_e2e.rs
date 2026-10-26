@@ -1,6 +1,10 @@
 //! 端到端服务层测试
 //! 用临时数据目录 + 真实 SQLite 文件，覆盖「连接 → 表结构 → 数据 CRUD → SQL → 导出」全链路
 
+// 这些测试会改进程级环境变量与全局 store，必须串行执行，
+// 唯一的办法就是让 SEQ 这个 MutexGuard 跨越 await 一直持有到测试结束。
+#![allow(clippy::await_holding_lock)]
+
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use tauri_sql_manager_lib::db::PoolManager;

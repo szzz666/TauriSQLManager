@@ -294,7 +294,7 @@ fn sqlite_value(row: &sqlx::sqlite::SqliteRow, i: usize) -> Json {
             .unwrap_or(Json::Null),
         "REAL" => row
             .try_get::<f64, _>(i)
-            .map(|f| Json::from(f))
+            .map(Json::from)
             .or_else(|_| row.try_get::<String, _>(i).map(Json::from))
             .unwrap_or(Json::Null),
         "BLOB" => match row.try_get::<Vec<u8>, _>(i) {
@@ -308,7 +308,7 @@ fn sqlite_value(row: &sqlx::sqlite::SqliteRow, i: usize) -> Json {
             .try_get::<String, _>(i)
             .map(Json::from)
             .or_else(|_| row.try_get::<i64, _>(i).map(Json::from))
-            .or_else(|_| row.try_get::<f64, _>(i).map(|f| Json::from(f)))
+            .or_else(|_| row.try_get::<f64, _>(i).map(Json::from))
             .unwrap_or(Json::Null),
     }
 }
@@ -329,12 +329,12 @@ fn mysql_value(row: &sqlx::mysql::MySqlRow, i: usize) -> Json {
         "TINYINT" | "SMALLINT" | "INT" | "MEDIUMINT" | "BIGINT" => row
             .try_get::<i64, _>(i)
             .map(Json::from)
-            .or_else(|_| row.try_get::<u64, _>(i).map(|u| Json::from(u)))
+            .or_else(|_| row.try_get::<u64, _>(i).map(Json::from))
             .or_else(|_| row.try_get::<String, _>(i).map(Json::from))
             .unwrap_or(Json::Null),
         "FLOAT" | "DOUBLE" => row
             .try_get::<f64, _>(i)
-            .map(|f| Json::from(f))
+            .map(Json::from)
             .or_else(|_| row.try_get::<String, _>(i).map(Json::from))
             .unwrap_or(Json::Null),
         "DECIMAL" => row
@@ -408,7 +408,7 @@ fn pg_value(row: &sqlx::postgres::PgRow, i: usize) -> Json {
             .unwrap_or(Json::Null),
         "FLOAT8" => row
             .try_get::<f64, _>(i)
-            .map(|v| Json::from(v))
+            .map(Json::from)
             .unwrap_or(Json::Null),
         "NUMERIC" => row
             .try_get::<sqlx::types::BigDecimal, _>(i)
@@ -431,7 +431,7 @@ fn pg_value(row: &sqlx::postgres::PgRow, i: usize) -> Json {
             .try_get::<String, _>(i)
             .map(Json::from)
             .or_else(|_| row.try_get::<i64, _>(i).map(Json::from))
-            .or_else(|_| row.try_get::<f64, _>(i).map(|v| Json::from(v)))
+            .or_else(|_| row.try_get::<f64, _>(i).map(Json::from))
             .or_else(|_| row.try_get::<chrono::NaiveDateTime, _>(i).map(|d| Json::String(d.to_string())))
             .unwrap_or(Json::Null),
     }
