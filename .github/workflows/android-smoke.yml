@@ -15,8 +15,11 @@ on:
     branches: [main]
     paths:
       - ".github/workflows/android-smoke.yml"
+      - "scripts/android-customize.sh"
+      - "scripts/android-build.sh"
       - "scripts/android-smoke.sh"
       - "src-tauri/mobile/android/**"
+      - "src-tauri/icons/android/**"
   workflow_dispatch:
     inputs:
       source:
@@ -39,14 +42,21 @@ env:
 
 jobs:
   smoke:
-    name: Smoke API ${{ matrix.api }}
+    name: Smoke API ${{ matrix.api }} (${{ matrix.arch }})
     runs-on: ubuntu-22.04
     permissions:
       contents: read
     strategy:
       fail-fast: false
       matrix:
-        api: [34, 35]
+        include:
+          # 模拟器架构必须与 runner 架构匹配：
+          # ubuntu-22.04 是 x86_64，跑 arm64 系统镜像只能靠 QEMU 全量模拟，
+          # 慢到经常装不完 APK 就超时。桌面 CI 上用 x86_64 镜像才跑得动。
+          # APK 自带全部 ABI（含 x86_64），装哪套镜像都能跑。
+          - api: 33
+            arch: x86_64
+            target: google_apis
     steps:
       - uses: actions/checkout@v4
 
@@ -67,7 +77,7 @@ jobs:
 
       # ---------------- 从源码构建 ----------------
       - name: 安装系统依赖
-        if: inputs.source == 'build'
+        if: inputs.source != 'release'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
@@ -75,14 +85,14 @@ jobs:
             librsvg2-dev patchelf libssl-dev build-essential
 
       - name: 安装 JDK 17
-        if: inputs.source == 'build'
+        if: inputs.source != 'release'
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
       - name: 配置 Android SDK 与 NDK
-        if: inputs.source == 'build'
+        if: inputs.source != 'release'
         run: |
           set -euo pipefail
           export ANDROID_HOME="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
@@ -104,45 +114,36 @@ jobs:
           echo "ANDROID_NDK_HOME=$NDK_DIR/$NDK_VERSION" >> "$GITHUB_ENV"
 
       - name: 安装 Node.js
-        if: inputs.source == 'build'
+        if: inputs.source != 'release'
         uses: actions/setup-node@v4
         with:
           node-version: "20"
           cache: npm
 
       - name: 安装 Rust 与 Android target
-        if: inputs.source == 'build'
+        if: inputs.source != 'release'
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
 
       - name: 缓存 Cargo
-        if: inputs.source == 'build'
+        if: inputs.source != 'release'
         uses: swatinem/rust-cache@v2
         with:
           workspaces: src-tauri
           key: android-smoke
 
       - name: 安装前端依赖
-        if: inputs.source == 'build'
+        if: inputs.source != 'release'
         run: npm ci
 
       - name: 初始化 Android 工程并应用定制
-        if: inputs.source == 'build'
+        if: inputs.source != 'release'
         run: bash scripts/android-customize.sh
 
-      - name: 生成调试密钥库
-        if: inputs.source == 'build'
-        run: |
-          mkdir -p "$HOME/.android"
-          keytool -genkeypair -v \
-            -keystore "$HOME/.android/debug.keystore" \
-            -storepass android -alias androiddebugkey -keypass android \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -dname "CN=Android Debug,O=Android,C=US"
-
+      # 调试密钥库由 android-build.sh 在缺失时自行生成
       - name: 构建并签名 APK
-        if: inputs.source == 'build'
+        if: inputs.source != 'release'
         run: bash scripts/android-build.sh
 
       # ---------------- 模拟器验证 ----------------
@@ -155,10 +156,12 @@ jobs:
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: ${{ matrix.api }}
-          target: google_apis
-          arch: x86_64
+          target: ${{ matrix.target }}
+          arch: ${{ matrix.arch }}
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          # 注意：android-emulator-runner 是把 script 逐行交给 sh -c 执行的，
+          # 变量不跨行保留。所以这里只能写一行，真实逻辑在脚本里。
           script: bash scripts/android-smoke.sh
 
       - name: 上传 logcat 与截图

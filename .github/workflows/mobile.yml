@@ -115,59 +115,14 @@ jobs:
       - name: 初始化 Android 工程并应用定制（状态栏避让 + 品牌图标）
         run: bash scripts/android-customize.sh
 
-      # 生成调试签名密钥库：apksigner 用它给 release APK 签名，
-      # 使产物可直接安装（调试证书，不可上架）
-      - name: 生成调试签名密钥库
-        run: |
-          mkdir -p "$HOME/.android"
-          if [ ! -f "$HOME/.android/debug.keystore" ]; then
-            keytool -genkeypair -v \
-              -keystore "$HOME/.android/debug.keystore" \
-              -storepass android -alias androiddebugkey -keypass android \
-              -keyalg RSA -keysize 2048 -validity 10000 \
-              -dname "CN=Android Debug,O=Android,C=US"
-          fi
-          echo "调试密钥库就绪: $HOME/.android/debug.keystore"
-
-      - name: 构建 release APK 与 AAB
-        run: npx tauri android build --apk --aab --ci
-
-      # 用 apksigner 给 release APK 签名（debug 变体体积达 789MB，不适合分发）
-      # 这样得到的包：44MB、release 优化、可直接安装
-      - name: 签名 release APK（可直接安装）
-        shell: bash
-        run: |
-          set -euo pipefail
-          OUT="src-tauri/gen/android/app/build/outputs"
-          APK=$(find "$OUT" -type f -name "*.apk" -path "*/release/*" | head -1 || true)
-          if [ -z "$APK" ]; then
-            echo "::error::未找到 release APK"
-            exit 1
-          fi
-          echo "待签名 APK: $APK"
-
-          # 定位 apksigner（build-tools 版本目录不固定）
-          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f 2>/dev/null | sort -V | tail -1)
-          if [ -z "$APKSIGNER" ]; then
-            echo "::error::未找到 apksigner"
-            ls "$ANDROID_HOME/build-tools" 2>/dev/null || true
-            exit 1
-          fi
-          echo "apksigner: $APKSIGNER"
-
-          # 签名（v1+v2+v3，兼容旧设备）
-          "$APKSIGNER" sign \
-            --ks "$HOME/.android/debug.keystore" \
-            --ks-pass pass:android \
-            --key-pass pass:android \
-            --ks-key-alias androiddebugkey \
-            --v1-signing-enabled true \
-            --v2-signing-enabled true \
-            --v3-signing-enabled true \
-            "$APK"
-
-          echo "--- 校验签名 ---"
-          "$APKSIGNER" verify --verbose "$APK" | head -12
+      # 构建 + apksigner 签名（v1/v2/v3）全部由 scripts/android-build.sh 完成，
+      # 与 android-smoke.yml 走同一条路径：冒烟测试验证的就是这里发布的产物。
+      # 调试密钥库缺失时由脚本自己生成（CI 上不预置）。
+      # ANDROID_BUILD_AAB=1 额外产出上架 Google Play 用的 AAB（冒烟测试不需要）。
+      - name: 构建并签名 release APK（含 AAB）
+        env:
+          ANDROID_BUILD_AAB: "1"
+        run: bash scripts/android-build.sh
 
       - name: 收集并重命名产物
         shell: bash
