@@ -1,0 +1,100 @@
+name: Android Smoke Test
+
+# 在真实 Android 模拟器上安装 APK 并启动，抓取 logcat。
+# 用途：图标 / 状态栏这类原生层改动无法靠「CI 构建通过」验证，
+# 必须真的跑起来一次，否则崩溃只能等用户反馈。
+
+on:
+  push:
+    branches: [main]
+    paths: [".github/workflows/android-smoke.yml"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "要测试的 Release tag"
+        required: true
+        default: v1.0.8
+
+concurrency:
+  group: android-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    name: Smoke API ${{ matrix.api }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [34, 35]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 下载待测 APK
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          TAG="${{ inputs.tag }}"
+          if [ -z "$TAG" ]; then TAG="v1.0.8"; fi
+          echo "测试 $TAG 的 APK"
+          mkdir -p apk
+          gh release download "$TAG" --repo "${{ github.repository }}" \
+            --pattern "*-installable.apk" --dir apk --clobber
+          ls -lh apk/
+
+      - name: 启用 KVM
+        run: |
+          echo "KVM: $(ls -l /dev/kvm 2>/dev/null || echo none)"
+          sudo chmod 666 /dev/kvm 2>/dev/null || true
+
+      - name: 模拟器启动并安装运行
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: |
+            set +e
+            PKG=top.szzz666.taurisqlmanager
+            APK=$(ls apk/*.apk | head -1)
+            echo "安装: $APK"
+            adb install -r -t "$APK"
+            if [ $? -ne 0 ]; then echo "::error::安装失败"; exit 1; fi
+            adb shell pm list packages | grep -i szzz
+
+            adb logcat -c
+            adb shell monkey -p "$PKG" -c android.intent.category.LAUNCHER 1
+            sleep 25
+
+            PID=$(adb shell pidof "$PKG" | tr -d "\r")
+            echo "PID=[$PID]"
+
+            adb logcat -d > logcat.txt
+            wc -l logcat.txt
+
+            echo "===== FATAL EXCEPTION ====="
+            grep -n -A 45 "FATAL EXCEPTION" logcat.txt | head -150
+            echo "===== 其他崩溃线索 ====="
+            grep -n -E "AndroidRuntime|NoClassDefFound|NoSuchMethod|ClassNotFound|UnsatisfiedLink|Unable to instantiate|ANR in|Force finishing" logcat.txt | head -60
+            echo "===== 应用相关日志 ====="
+            grep -iE "$PKG|tauri|RustWebView|chromium|WebViewFactory" logcat.txt | tail -80
+
+            if [ -z "$PID" ]; then
+              echo "::error::应用进程已退出（启动即崩溃），见上方 FATAL EXCEPTION"
+              exit 1
+            fi
+            echo "✅ 应用进程存活: $PID"
+
+      - name: 上传 logcat
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logcat-api${{ matrix.api }}
+          path: logcat.txt
+          if-no-files-found: warn
+          retention-days: 7
